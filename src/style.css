@@ -979,6 +979,178 @@ footer {
   backdrop-filter: blur(18px);
 }
 
+.dashboardTopbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 64px;
+  padding: 14px 18px;
+  background: #0b0d0c;
+  border-bottom: 1px solid rgba(255, 253, 247, 0.1);
+  color: #f8f4ea;
+}
+
+.dashboardAppShell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: calc(100vh - 64px);
+  background: #0e1110;
+  color: #f8f4ea;
+}
+
+.appSidebar {
+  position: sticky;
+  top: 64px;
+  min-height: calc(100vh - 64px);
+  border-right: 1px solid rgba(255, 253, 247, 0.1);
+}
+
+.dashboardWorkspace {
+  min-width: 0;
+  padding: 28px;
+}
+
+.dashboardWorkspaceHead {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.dashboardWorkspaceHead h1 {
+  margin-bottom: 0;
+  color: #f8f4ea;
+  font-size: clamp(34px, 5vw, 54px);
+}
+
+.dashboardLoginCard,
+.dashboardMetricGrid article,
+.dashboardApiPanel,
+.dashboardUsagePanel,
+.dashboardQuickActions {
+  border: 1px solid rgba(255, 253, 247, 0.1);
+  border-radius: 8px;
+  background: #151917;
+  box-shadow: none;
+}
+
+.dashboardLoginCard {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(320px, 0.7fr);
+  gap: 24px;
+  align-items: center;
+  padding: 24px;
+}
+
+.dashboardLoginCard h2,
+.dashboardPanelHead h2,
+.dashboardQuickActions h2 {
+  margin-bottom: 8px;
+  color: #f8f4ea;
+  font-size: clamp(26px, 3vw, 34px);
+}
+
+.dashboardLoginCard p {
+  color: #aab2ad;
+}
+
+.dashboardMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboardMetricGrid article {
+  padding: 18px;
+}
+
+.dashboardMetricGrid span,
+.dashboardPanelHead span {
+  display: block;
+  color: #9aa5a0;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dashboardMetricGrid strong {
+  display: block;
+  margin-top: 8px;
+  color: #f8f4ea;
+  font-size: 28px;
+}
+
+.dashboardMetricGrid small {
+  color: #9aa5a0;
+  font-weight: 800;
+}
+
+.dashboardApiPanel,
+.dashboardUsagePanel,
+.dashboardQuickActions {
+  margin-top: 16px;
+  padding: 20px;
+}
+
+.dashboardPanelHead {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboardPanelHead code,
+.dashboardApiPanel > code {
+  overflow-wrap: anywhere;
+}
+
+.dashboardPanelHead button,
+.dashboardQuickActions button,
+.dashboardQuickActions a {
+  min-height: 40px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #f8f4ea;
+  color: #0e1110;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.dashboardPanelHead button {
+  background: #e6542d;
+  color: #fffdf7;
+}
+
+.dashboardPanelHead b {
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(243, 178, 63, 0.14);
+  color: #f3b23f;
+  text-transform: uppercase;
+}
+
+.dashboardApiPanel > code {
+  display: block;
+  border-radius: 8px;
+  padding: 13px;
+  background: #242826;
+  color: #f8f4ea;
+}
+
+.dashboardQuickActions div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .adminShell {
   min-height: 100vh;
   padding: 58px 7vw 86px;
@@ -1190,6 +1362,9 @@ footer {
   }
 
   .adminShellNav,
+  .dashboardTopbar,
+  .dashboardWorkspaceHead,
+  .dashboardPanelHead,
   .adminPanelHead {
     align-items: flex-start;
     flex-direction: column;
@@ -1220,6 +1395,21 @@ footer {
 
   .memberDashboard {
     margin-inline: 4vw;
+  }
+
+  .dashboardAppShell,
+  .dashboardLoginCard,
+  .dashboardMetricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .appSidebar {
+    position: static;
+    min-height: auto;
+  }
+
+  .dashboardWorkspace {
+    padding: 18px;
   }
 
   .memberSidebar,
