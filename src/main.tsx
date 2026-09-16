@@ -389,6 +389,8 @@ function App() {
   const selectedPackage = dashboard?.activePackage?.packageId || dashboard?.latestKey?.packageId || packages[0]?.id || 'starter';
   const latestOrder = dashboard?.orders[0] || null;
   const memberName = dashboard?.customer.displayName || dashboard?.customer.email;
+  const activeQuotaParts = dashboard?.activePackage?.packageName.split(' ') || [];
+  const activeQuota = activeQuotaParts[activeQuotaParts.length - 1] || '0';
 
   if (window.location.pathname === '/admin') return <AdminApp />;
 
@@ -403,7 +405,7 @@ function App() {
       </nav>
       <div className="navActions">
         {memberName && <span className="memberPill">{memberName}</span>}
-        <a className="login" href="#dashboard">{dashboard ? 'Dashboard' : 'Member Area'}</a>
+        <a className={`login ${dashboard ? '' : 'telegramCta'}`} href="#dashboard">{dashboard ? 'Dashboard' : 'Login with Telegram'}</a>
         {token && <button className="logoutButton" onClick={logout}>Logout</button>}
       </div>
     </header>
@@ -453,7 +455,7 @@ function App() {
         <h2>Storefront ramping. Backend tetap LiteLLM.</h2>
         <div className="grid3">
           <article><h3>Paket token</h3><p>Customer pilih quota, backend membuat order pending, lalu admin bisa approve manual dulu.</p></article>
-          <article><h3>Member dashboard</h3><p>Login email ringan, lihat order, plan aktif, API key masked, dan status gateway.</p></article>
+          <article><h3>Member dashboard</h3><p>Login Telegram, lihat order, plan aktif, API key masked, dan status gateway.</p></article>
           <article><h3>LiteLLM key</h3><p>Generate API key real via LiteLLM admin API dengan budget dan durasi sesuai paket.</p></article>
         </div>
       </section>
@@ -482,8 +484,20 @@ function App() {
         </div>
       </section>
 
-      <section id="dashboard" className="section dashboard">
-        <div>
+      <section id="dashboard" className="section dashboard memberDashboard">
+        <aside className="memberSidebar">
+          <div className="memberSidebarBrand"><span>AI</span><strong>ElaltidarAI</strong></div>
+          <nav>
+            <a className="isActive" href="#dashboard">Dashboard</a>
+            <a href="#pricing">Kuota</a>
+            <a href="#docs">Dokumentasi</a>
+          </nav>
+          <div className="memberSidebarUser">
+            <b>{memberName || 'Belum login'}</b>
+            <span>{dashboard?.customer.telegramUsername ? `@${dashboard.customer.telegramUsername}` : 'Login Telegram'}</span>
+          </div>
+        </aside>
+        <div className="memberLoginPanel">
           <p className="eyebrow">Member dashboard</p>
           <h2>Member area</h2>
           <p>Login Telegram untuk membuat order, menunggu approval admin, lalu generate key LiteLLM dengan quota paket.</p>
@@ -502,25 +516,46 @@ function App() {
           </form>}
           {message && <p className="notice">{message}</p>}
         </div>
-        <div className="panel">
+        <div className="panel memberConsolePanel">
           <div className="consoleBar"><span></span><span></span><span></span><b>member console</b></div>
-          <div className="memberTop">
-            <div><span>Member</span><strong>{dashboard?.customer.email || 'Belum login'}</strong></div>
-            <div><span>Plan aktif</span><strong>{dashboard?.activePackage?.packageName || 'Belum ada'}</strong></div>
+          <div className="memberTop metricCards">
+            <div><span>Saldo Elaltidar</span><strong>Rp 0</strong><small>Manual topup soon</small></div>
+            <div><span>Sisa token</span><strong>{dashboard?.activePackage ? activeQuota : '0'}</strong><small>Quota aktif</small></div>
+            <div><span>Model aktif</span><strong>{packages.length}</strong><small>Model tersedia</small></div>
           </div>
-          <div className="meter">
-            <div><span>Gateway</span><b>{dashboard?.gateway.baseUrl || GATEWAY_BASE}</b><em>OpenAI-compatible</em></div>
-            <i><u style={{ width: dashboard ? '100%' : '18%' }} /></i>
+          <div className="apiKeyPanel">
+            <div>
+              <span>API Key</span>
+              <p>Gunakan dengan endpoint <code>{dashboard?.gateway.baseUrl || GATEWAY_BASE}</code></p>
+            </div>
+            <button disabled={!token || busy === `key-${selectedPackage}`} onClick={() => createKey(selectedPackage)}>{busy === `key-${selectedPackage}` ? 'Generate...' : 'Generate key'}</button>
+            <code>{plainKey || dashboard?.latestKey?.publicKey || 'Belum dibuat'}</code>
           </div>
-          <div className="meter">
-            <div><span>Order terakhir</span><b>{latestOrder?.packageName || 'Belum ada order'}</b><em>{latestOrder?.status || 'idle'}</em></div>
-            <i><u style={{ width: latestOrder?.status === 'paid' ? '100%' : latestOrder ? '50%' : '10%' }} /></i>
+          <div className="usagePanel">
+            <div className="usagePanelHead">
+              <div><span>Pemakaian token</span><strong>Statistik pemakaian API Anda</strong></div>
+              <b>{latestOrder?.status || 'idle'}</b>
+            </div>
+            <div className="usageStats">
+              <div><span>Hari ini</span><strong>0</strong><small>request</small></div>
+              <div><span>Bulan ini</span><strong>0</strong><small>request</small></div>
+              <div><span>Total request</span><strong>0</strong><small>request</small></div>
+              <div><span>Total token</span><strong>0</strong><small>masuk / keluar</small></div>
+            </div>
+            <div className="meter">
+              <div><span>Order terakhir</span><b>{latestOrder?.packageName || 'Belum ada order'}</b><em>{latestOrder?.status || 'idle'}</em></div>
+              <i><u style={{ width: latestOrder?.status === 'paid' ? '100%' : latestOrder ? '50%' : '10%' }} /></i>
+            </div>
           </div>
           {latestOrder?.status === 'pending' && <p className="approvalNote">Order sedang menunggu approval admin setelah pembayaran dikonfirmasi.</p>}
-          <div className="keyBox">
-            <span>API Key</span>
-            <code>{plainKey || dashboard?.latestKey?.publicKey || 'Belum dibuat'}</code>
-            <button disabled={!token || busy === `key-${selectedPackage}`} onClick={() => createKey(selectedPackage)}>{busy === `key-${selectedPackage}` ? 'Generate...' : 'Generate key'}</button>
+          <div className="quickActions">
+            <h3>Quick actions</h3>
+            <div>
+              <a href="#pricing">Lihat model</a>
+              <a href="#pricing">Buy quota</a>
+              <a href="#docs">Docs API</a>
+              <button disabled={!token} onClick={() => refreshDashboard()}>Refresh dashboard</button>
+            </div>
           </div>
         </div>
       </section>
