@@ -6,10 +6,5 @@
   "rewrites": [
     { "source": "/health", "destination": "/api/health" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "functions": {
-    "api/[...path].js": {
-      "runtime": "nodejs22.x"
-    }
-  }
+  ]
 }
