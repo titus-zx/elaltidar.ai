@@ -508,6 +508,7 @@ function App() {
     setDashboard(null);
     setPlainKey('');
     setMessage('Session sudah keluar dari browser ini.');
+    navigate('/');
   }
 
   async function createOrder(packageId: string) {
