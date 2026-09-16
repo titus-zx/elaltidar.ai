@@ -280,10 +280,6 @@ function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, sele
   return <>
     <header className="dashboardTopbar">
       <a className="brand" href="/">ElaltidarAI</a>
-      <div className="navActions">
-        <a className="login" href="/">Storefront</a>
-        {token && <button className="logoutButton" onClick={logout}>Logout</button>}
-      </div>
     </header>
     <main className="dashboardAppShell">
       <aside className="memberSidebar appSidebar">
@@ -296,6 +292,11 @@ function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, sele
           <a href="/admin">Admin</a>
         </nav>
         <div className="memberSidebarUser">
+          <div className="sidebarAccountMenu">
+            <a href="/">Storefront</a>
+            <a href="/#docs">Bantuan</a>
+            {token && <button onClick={logout}>Keluar</button>}
+          </div>
           <b>{memberName || 'Belum login'}</b>
           <span>{dashboard?.customer.telegramUsername ? `@${dashboard.customer.telegramUsername}` : 'Telegram login'}</span>
         </div>

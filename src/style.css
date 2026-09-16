@@ -613,6 +613,46 @@ footer {
   padding-top: 16px;
 }
 
+.sidebarAccountMenu {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 253, 247, 0.12);
+  border-radius: 8px;
+  padding: 6px;
+  background: #0e1110;
+}
+
+.sidebarAccountMenu a,
+.sidebarAccountMenu button {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: transparent;
+  color: #f8f4ea;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.sidebarAccountMenu a::after {
+  content: ">";
+  color: #9aa5a0;
+}
+
+.sidebarAccountMenu button {
+  color: #f87171;
+}
+
+.sidebarAccountMenu a:hover,
+.sidebarAccountMenu button:hover {
+  background: rgba(255, 253, 247, 0.08);
+}
+
 .memberSidebarUser b,
 .memberSidebarUser span {
   display: block;
