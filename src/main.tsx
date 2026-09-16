@@ -316,7 +316,7 @@ function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, sele
             <p>Gunakan Telegram untuk mengelola order, quota, dan API key ElaltidarAI.</p>
           </div>
           <div className="telegramLogin">
-            <div id="telegram-login-slot"></div>
+            <div data-telegram-login-slot data-size="large"></div>
             {!publicConfig.telegramBotUsername && <span>Set TELEGRAM_BOT_USERNAME di Vercel untuk mengaktifkan tombol Telegram.</span>}
           </div>
           {publicConfig.allowDevLogin && <form className="loginForm" onSubmit={login}>
@@ -438,9 +438,8 @@ function App() {
 
   useEffect(() => {
     if (!publicConfig.telegramBotUsername) return;
-    const container = document.getElementById('telegram-login-slot');
-    if (!container) return;
-    container.innerHTML = '';
+    const containers = Array.from(document.querySelectorAll('[data-telegram-login-slot]'));
+    if (containers.length === 0) return;
     (window as unknown as { onTelegramAuth: (user: TelegramAuth) => void }).onTelegramAuth = async (user) => {
       setBusy('telegram');
       setMessage('');
@@ -460,16 +459,19 @@ function App() {
         setBusy('');
       }
     };
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.setAttribute('data-telegram-login', publicConfig.telegramBotUsername);
-    script.setAttribute('data-size', 'large');
-    script.setAttribute('data-userpic', 'false');
-    script.setAttribute('data-request-access', 'write');
-    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
-    container.appendChild(script);
-  }, [publicConfig.telegramBotUsername]);
+    containers.forEach((container) => {
+      container.innerHTML = '';
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = 'https://telegram.org/js/telegram-widget.js?22';
+      script.setAttribute('data-telegram-login', publicConfig.telegramBotUsername);
+      script.setAttribute('data-size', container.getAttribute('data-size') || 'large');
+      script.setAttribute('data-userpic', 'false');
+      script.setAttribute('data-request-access', 'write');
+      script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+      container.appendChild(script);
+    });
+  }, [publicConfig.telegramBotUsername, path, dashboard]);
 
   useEffect(() => {
     if (!token) return;
@@ -577,8 +579,8 @@ function App() {
         <a href="#docs">Docs</a>
       </nav>
       <div className="navActions">
-        {memberName && <span className="memberPill">{memberName}</span>}
-        <a className={`login ${dashboard ? '' : 'telegramCta'}`} href="/dashboard">{dashboard ? 'Dashboard' : 'Login with Telegram'}</a>
+        {memberName ? <a className="memberPill telegramMemberPill" href="/dashboard">{memberName}</a> : publicConfig.telegramBotUsername ? <div className="telegramHeaderLogin" data-telegram-login-slot data-size="medium"></div> : <a className="login telegramCta" href="/dashboard">Login with Telegram</a>}
+        {memberName && <a className="login" href="/dashboard">Dashboard</a>}
         {token && <button className="logoutButton" onClick={logout}>Logout</button>}
       </div>
     </header>
