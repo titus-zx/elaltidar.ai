@@ -46,6 +46,8 @@ The API bootstraps the required Postgres tables automatically on first request. 
 
 Customer-created orders stay `pending`. Approve them from an admin tool by calling:
 
+Open the admin UI at `/admin`, enter `ADMIN_TOKEN`, then load and approve pending orders.
+
 ```bash
 curl -X POST https://your-domain.vercel.app/api/admin/orders/ORDER_ID/approve \
 	-H "x-admin-token: $ADMIN_TOKEN"

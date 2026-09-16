@@ -151,6 +151,10 @@ test('admin token is required to approve orders', async () => {
     assert.equal(approved.status, 200);
     assert.equal(approved.body.order.status, 'paid');
 
+    const allOrders = await getWithHeaders(base, '/api/admin/orders', { 'x-admin-token': 'admin-secret' });
+    assert.equal(allOrders.status, 200);
+    assert.equal(allOrders.body.orders[0].customer.email, 'titus@example.com');
+
     const pending = await getWithHeaders(base, '/api/admin/orders?status=pending', { 'x-admin-token': 'admin-secret' });
     assert.equal(pending.status, 200);
     assert.equal(pending.body.orders.length, 0);

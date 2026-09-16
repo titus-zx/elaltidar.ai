@@ -22,12 +22,19 @@ type Customer = {
 
 type Order = {
   id: string;
+  customerId?: string;
   packageId: string;
   packageName: string;
   amount: number;
   status: 'pending' | 'paid';
   createdAt: string;
   paidAt: string | null;
+  customer?: {
+    id: string;
+    email: string;
+    displayName?: string;
+    telegramUsername?: string | null;
+  };
 };
 
 type KeyMeta = {
@@ -112,6 +119,136 @@ function formatRupiah(amount: number) {
 
 function metaForPackage(packageId: string) {
   return providerMeta[packageId] || { name: 'Model Pool', icon: modelMark('AI', '#15605b'), accent: '#15605b' };
+}
+
+function formatDate(value: string | null) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+}
+
+function AdminApp() {
+  const [adminToken, setAdminToken] = useState(() => localStorage.getItem('elaltidar_admin_token') || '');
+  const [draftToken, setDraftToken] = useState(adminToken);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'all'>('pending');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+
+  async function loadOrders(currentToken = adminToken, currentFilter = statusFilter) {
+    if (!currentToken) return;
+    setBusy('load-orders');
+    setMessage('');
+    try {
+      const query = currentFilter === 'pending' ? '?status=pending' : '';
+      const data = await api<{ orders: Order[] }>(`/admin/orders${query}`, { headers: { 'x-admin-token': currentToken } });
+      setOrders(data.orders);
+      setMessage(`${data.orders.length} order dimuat.`);
+    } catch (error) {
+      setMessage(`Admin load gagal: ${(error as Error).message}`);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  useEffect(() => {
+    if (!adminToken) return;
+    loadOrders(adminToken, statusFilter);
+  }, [adminToken, statusFilter]);
+
+  function saveToken(event: FormEvent) {
+    event.preventDefault();
+    localStorage.setItem('elaltidar_admin_token', draftToken);
+    setAdminToken(draftToken);
+  }
+
+  function clearToken() {
+    localStorage.removeItem('elaltidar_admin_token');
+    setAdminToken('');
+    setDraftToken('');
+    setOrders([]);
+    setMessage('Admin token dihapus dari browser ini.');
+  }
+
+  async function approveOrder(orderId: string) {
+    setBusy(`approve-${orderId}`);
+    setMessage('');
+    try {
+      await api<{ order: Order }>(`/admin/orders/${orderId}/approve`, {
+        method: 'POST',
+        headers: { 'x-admin-token': adminToken },
+        body: JSON.stringify({}),
+      });
+      setMessage('Order berhasil di-approve.');
+      await loadOrders(adminToken, statusFilter);
+    } catch (error) {
+      setMessage(`Approve gagal: ${(error as Error).message}`);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const pendingCount = orders.filter((order) => order.status === 'pending').length;
+  const paidCount = orders.filter((order) => order.status === 'paid').length;
+  const grossAmount = orders.reduce((sum, order) => sum + order.amount, 0);
+
+  return <>
+    <header className="adminShellNav">
+      <a className="brand" href="/">ElaltidarAI</a>
+      <div className="navActions">
+        <a className="login" href="/">Storefront</a>
+        {adminToken && <button className="logoutButton" onClick={clearToken}>Clear token</button>}
+      </div>
+    </header>
+    <main className="adminShell">
+      <section className="adminHero">
+        <div>
+          <p className="eyebrow">Admin Area</p>
+          <h1>Order operations console.</h1>
+          <p>Approve manual payments, monitor pending orders, and keep the customer flow moving without exposing admin actions in the public dashboard.</p>
+        </div>
+        <form className="adminTokenCard" onSubmit={saveToken}>
+          <span>Admin access</span>
+          <input type="password" placeholder="ADMIN_TOKEN" value={draftToken} onChange={(event) => setDraftToken(event.target.value)} required />
+          <button disabled={busy === 'load-orders'}>{adminToken ? 'Update token' : 'Unlock admin'}</button>
+        </form>
+      </section>
+
+      <section className="adminStats">
+        <div><span>Loaded orders</span><strong>{orders.length}</strong></div>
+        <div><span>Pending</span><strong>{pendingCount}</strong></div>
+        <div><span>Paid</span><strong>{paidCount}</strong></div>
+        <div><span>Gross value</span><strong>{formatRupiah(grossAmount)}</strong></div>
+      </section>
+
+      <section className="adminPanel">
+        <div className="adminPanelHead">
+          <div>
+            <p className="eyebrow">Orders</p>
+            <h2>Manual approval queue</h2>
+          </div>
+          <div className="adminToolbar">
+            <button className={statusFilter === 'pending' ? 'isActive' : ''} onClick={() => setStatusFilter('pending')}>Pending</button>
+            <button className={statusFilter === 'all' ? 'isActive' : ''} onClick={() => setStatusFilter('all')}>All</button>
+            <button disabled={!adminToken || busy === 'load-orders'} onClick={() => loadOrders()}>{busy === 'load-orders' ? 'Loading...' : 'Refresh'}</button>
+          </div>
+        </div>
+        {message && <p className="notice">{message}</p>}
+        <div className="adminTable">
+          <div className="adminTableHeader">
+            <span>Customer</span><span>Package</span><span>Amount</span><span>Status</span><span>Created</span><span>Action</span>
+          </div>
+          {orders.length === 0 ? <div className="adminEmpty">Belum ada order untuk filter ini.</div> : orders.map((order) => <article className="adminOrderRow" key={order.id}>
+            <div><b>{order.customer?.displayName || order.customer?.email || order.customerId}</b><small>{order.customer?.telegramUsername ? `@${order.customer.telegramUsername}` : order.customer?.email}</small></div>
+            <div><b>{order.packageName}</b><small>{order.id}</small></div>
+            <div>{formatRupiah(order.amount)}</div>
+            <div><span className={`statusBadge ${order.status}`}>{order.status}</span></div>
+            <div>{formatDate(order.createdAt)}</div>
+            <div>{order.status === 'pending' ? <button disabled={busy === `approve-${order.id}`} onClick={() => approveOrder(order.id)}>{busy === `approve-${order.id}` ? 'Approving...' : 'Approve'}</button> : <span className="paidAt">Paid {formatDate(order.paidAt)}</span>}</div>
+          </article>)}
+        </div>
+      </section>
+    </main>
+  </>;
 }
 
 function App() {
@@ -252,6 +389,8 @@ function App() {
   const selectedPackage = dashboard?.activePackage?.packageId || dashboard?.latestKey?.packageId || packages[0]?.id || 'starter';
   const latestOrder = dashboard?.orders[0] || null;
   const memberName = dashboard?.customer.displayName || dashboard?.customer.email;
+
+  if (window.location.pathname === '/admin') return <AdminApp />;
 
   return <>
     <header className="nav">

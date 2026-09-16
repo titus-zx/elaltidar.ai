@@ -70,6 +70,12 @@ function mapOrder(row) {
     status: row.status,
     createdAt: row.created_at || row.createdAt,
     paidAt: row.paid_at || row.paidAt,
+    customer: row.customer_email || row.customerEmail ? {
+      id: row.customer_id || row.customerId,
+      email: row.customer_email || row.customerEmail,
+      displayName: row.customer_display_name || row.customerDisplayName || row.customer_email || row.customerEmail,
+      telegramUsername: row.customer_telegram_username || row.customerTelegramUsername || null,
+    } : undefined,
   } : null;
 }
 
@@ -247,12 +253,18 @@ function createPostgresStore(databaseUrl) {
       await ensureReady();
       const result = status
         ? await pool.query(`
-          SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at
-          FROM orders WHERE status = $1 ORDER BY created_at DESC
+          SELECT orders.id, orders.customer_id, orders.package_id, orders.package_name, orders.amount, orders.status, orders.created_at, orders.paid_at,
+            customers.email AS customer_email, customers.display_name AS customer_display_name, customers.telegram_username AS customer_telegram_username
+          FROM orders
+          JOIN customers ON customers.id = orders.customer_id
+          WHERE orders.status = $1 ORDER BY orders.created_at DESC
         `, [status])
         : await pool.query(`
-          SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at
-          FROM orders ORDER BY created_at DESC
+          SELECT orders.id, orders.customer_id, orders.package_id, orders.package_name, orders.amount, orders.status, orders.created_at, orders.paid_at,
+            customers.email AS customer_email, customers.display_name AS customer_display_name, customers.telegram_username AS customer_telegram_username
+          FROM orders
+          JOIN customers ON customers.id = orders.customer_id
+          ORDER BY orders.created_at DESC
         `);
       return result.rows.map(mapOrder);
     },
@@ -354,7 +366,7 @@ function createSqliteStore(file) {
     },
     customerByToken(token) {
       if (!token) return null;
-      return db.prepare(`
+      const customer = db.prepare(`
         SELECT customers.id, customers.email, customers.created_at AS createdAt
         , customers.display_name AS displayName, customers.telegram_id AS telegramId, customers.telegram_username AS telegramUsername
         FROM sessions
@@ -400,12 +412,18 @@ function createSqliteStore(file) {
     listOrders({ status } = {}) {
       const query = status
         ? db.prepare(`
-          SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt
-          FROM orders WHERE status = ? ORDER BY created_at DESC
+          SELECT orders.id, orders.customer_id AS customerId, orders.package_id AS packageId, orders.package_name AS packageName, orders.amount, orders.status, orders.created_at AS createdAt, orders.paid_at AS paidAt,
+            customers.email AS customerEmail, customers.display_name AS customerDisplayName, customers.telegram_username AS customerTelegramUsername
+          FROM orders
+          JOIN customers ON customers.id = orders.customer_id
+          WHERE orders.status = ? ORDER BY orders.created_at DESC
         `).all(status)
         : db.prepare(`
-          SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt
-          FROM orders ORDER BY created_at DESC
+          SELECT orders.id, orders.customer_id AS customerId, orders.package_id AS packageId, orders.package_name AS packageName, orders.amount, orders.status, orders.created_at AS createdAt, orders.paid_at AS paidAt,
+            customers.email AS customerEmail, customers.display_name AS customerDisplayName, customers.telegram_username AS customerTelegramUsername
+          FROM orders
+          JOIN customers ON customers.id = orders.customer_id
+          ORDER BY orders.created_at DESC
         `).all();
       return query.map(mapOrder);
     },
