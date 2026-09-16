@@ -8,5 +8,8 @@
     { "source": "/v1/(.*)", "destination": "/api/[...path].js" },
     { "source": "/health", "destination": "/api/health" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/sync-expired-entitlements", "schedule": "0 * * * *" }
   ]
 }

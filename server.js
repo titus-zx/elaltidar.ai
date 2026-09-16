@@ -35,6 +35,7 @@ export function loadConfig(envText = '') {
     storeFile: env.STORE_FILE || (env.VERCEL ? '/tmp/elaltidar.sqlite' : './data/elaltidar.sqlite'),
     databaseUrl: env.DATABASE_URL || env.POSTGRES_URL || '',
     adminToken: env.ADMIN_TOKEN || '',
+    cronSecret: env.CRON_SECRET || '',
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || '',
     telegramBotUsername: env.TELEGRAM_BOT_USERNAME || '',
     allowDevLogin: env.ALLOW_DEV_LOGIN === 'true' || (!env.VERCEL && env.NODE_ENV !== 'production'),
@@ -277,6 +278,16 @@ function createPostgresStore(databaseUrl) {
       `, [customerId]);
       return mapPrivateKey(result.rows[0]);
     },
+    async customersWithKeys() {
+      await ensureReady();
+      const result = await pool.query(`
+        SELECT customers.id, customers.email, customers.display_name, customers.telegram_id, customers.telegram_username, customers.created_at
+        FROM customers
+        JOIN api_keys ON api_keys.customer_id = customers.id
+        ORDER BY customers.created_at DESC
+      `);
+      return result.rows.map(mapCustomer);
+    },
     async createOrder(customerId, packageId) {
       await ensureReady();
       const pkg = packages[packageId] || packages.starter;
@@ -494,6 +505,14 @@ function createSqliteStore(file) {
       `).get(customerId);
       return mapPrivateKey(row);
     },
+    customersWithKeys() {
+      return db.prepare(`
+        SELECT customers.id, customers.email, customers.display_name AS displayName, customers.telegram_id AS telegramId, customers.telegram_username AS telegramUsername, customers.created_at AS createdAt
+        FROM customers
+        JOIN keys ON keys.customer_id = customers.id
+        ORDER BY customers.created_at DESC
+      `).all().map(mapCustomer);
+    },
     createOrder(customerId, packageId) {
       const pkg = packages[packageId] || packages.starter;
       const row = { id: randomBytes(8).toString('hex'), customerId, packageId: pkg.id, packageName: pkg.name, amount: pkg.maxBudget, status: 'pending', createdAt: new Date().toISOString(), paidAt: null, expiresAt: null };
@@ -595,6 +614,11 @@ function isAdmin(req, config) {
   return Boolean(config.adminToken && getAdminToken(req) === config.adminToken);
 }
 
+function isCron(req, config) {
+  const auth = req.headers.authorization || '';
+  return Boolean(config.cronSecret && auth === `Bearer ${config.cronSecret}`);
+}
+
 async function readLiteLLMUsage({ config, latestKey, fetchImpl }) {
   if (!config.litellmMasterKey || !latestKey?.litellmKeyAlias) return null;
   const url = `${config.litellmBaseUrl}/key/info?key=${encodeURIComponent(latestKey.litellmKeyAlias)}`;
@@ -636,6 +660,25 @@ async function syncCustomerLiteLLMKey({ store, config, customer, fetchImpl }) {
     throw error;
   }
   return { synced: true, keyMeta: mapKey(existingKey), models: params.activeModels, detail: payload };
+}
+
+async function syncAllCustomerLiteLLMKeys({ store, config, fetchImpl }) {
+  const customers = await store.customersWithKeys();
+  const results = [];
+  for (const customer of customers) {
+    try {
+      const result = await syncCustomerLiteLLMKey({ store, config, customer, fetchImpl });
+      results.push({ customerId: customer.id, email: customer.email, ...result });
+    } catch (error) {
+      results.push({ customerId: customer.id, email: customer.email, synced: false, error: error.message || 'sync_failed', status: error.status || 500, detail: error.detail || null });
+    }
+  }
+  return {
+    checked: results.length,
+    synced: results.filter((item) => item.synced).length,
+    failed: results.filter((item) => item.error).length,
+    results,
+  };
 }
 
 export function createApiServer({ store, config = loadConfig(), fetchImpl = fetch } = {}) {
@@ -712,6 +755,16 @@ export function createApiServer({ store, config = loadConfig(), fetchImpl = fetc
   app.get('/api/admin/orders', async (req, res) => {
     if (!isAdmin(req, config)) return res.status(401).json({ error: 'admin_unauthorized' });
     return res.json({ orders: await appStore.listOrders({ status: req.query.status }) });
+  });
+
+  app.post('/api/admin/sync-keys', async (req, res) => {
+    if (!isAdmin(req, config)) return res.status(401).json({ error: 'admin_unauthorized' });
+    return res.json(await syncAllCustomerLiteLLMKeys({ store: appStore, config, fetchImpl }));
+  });
+
+  app.get('/api/cron/sync-expired-entitlements', async (req, res) => {
+    if (!isCron(req, config)) return res.status(401).json({ error: 'cron_unauthorized' });
+    return res.json(await syncAllCustomerLiteLLMKeys({ store: appStore, config, fetchImpl }));
   });
 
   app.post('/api/admin/orders/:orderId/approve', async (req, res) => {

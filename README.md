@@ -23,6 +23,7 @@ DATABASE_URL=postgres://user:password@host:5432/elaltidar
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 TELEGRAM_BOT_USERNAME=your_bot_username
 ADMIN_TOKEN=long-random-admin-token
+CRON_SECRET=long-random-cron-secret
 ```
 
 `DATABASE_URL` can come from Vercel Postgres, Neon, Supabase, or another managed Postgres provider. Without `DATABASE_URL`, the API falls back to local SQLite.
@@ -70,6 +71,8 @@ curl https://your-domain.vercel.app/v1/models \
 The response only includes models from active, non-expired paid orders for that customer.
 
 Each customer has one LiteLLM virtual key. When a customer already has a key, new approved model orders update that existing LiteLLM key through `/key/update` instead of creating another key. The key's `models` allowlist is recomputed from active, non-expired paid orders.
+
+Vercel Cron calls `/api/cron/sync-expired-entitlements` hourly. Set `CRON_SECRET` in Vercel so expired model entitlements are removed from existing LiteLLM key allowlists. Admins can also trigger the same sync from `/admin` with the `Sync keys` action.
 
 ## Checks
 

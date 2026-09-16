@@ -281,3 +281,52 @@ test('existing customer key is reused and synced when new model orders are appro
     store.close();
   }
 });
+
+test('cron sync recomputes LiteLLM allowlists for existing customer keys', async () => {
+  const calls = [];
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/key/update')) {
+      return new Response(JSON.stringify({ updated: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ key: 'sk-cron-customer-key', key_name: 'elaltidar-titus' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const store = createStore({ file: ':memory:' });
+  const app = createApiServer({ store, fetchImpl: fakeFetch, config: { litellmBaseUrl: 'https://litellm.test', litellmMasterKey: 'master', allowDevLogin: true, adminToken: 'admin-secret', cronSecret: 'cron-secret' } });
+  const server = await listen(app);
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const login = await post(base, '/api/login', { email: 'titus@example.com' });
+    const starter = await postWithHeaders(base, '/api/orders', { packageId: 'starter' }, { authorization: `Bearer ${login.body.token}` });
+    await postWithHeaders(base, `/api/admin/orders/${starter.body.order.id}/approve`, {}, { 'x-admin-token': 'admin-secret' });
+    await post(base, '/api/keys', { token: login.body.token });
+
+    const rejected = await getWithHeaders(base, '/api/cron/sync-expired-entitlements', { authorization: 'Bearer wrong' });
+    assert.equal(rejected.status, 401);
+
+    const synced = await getWithHeaders(base, '/api/cron/sync-expired-entitlements', { authorization: 'Bearer cron-secret' });
+    assert.equal(synced.status, 200);
+    assert.equal(synced.body.checked, 1);
+    assert.equal(synced.body.synced, 1);
+
+    const adminSynced = await postWithHeaders(base, '/api/admin/sync-keys', {}, { 'x-admin-token': 'admin-secret' });
+    assert.equal(adminSynced.status, 200);
+    assert.equal(adminSynced.body.checked, 1);
+
+    const updateCalls = calls.filter((call) => call.url.endsWith('/key/update'));
+    assert.equal(updateCalls.length, 2);
+    const cronUpdateBody = JSON.parse(updateCalls[0].options.body);
+    assert.equal(cronUpdateBody.key, 'sk-cron-customer-key');
+    assert.deepEqual(cronUpdateBody.models, ['gpt-4.1-mini']);
+  } finally {
+    server.close();
+    await once(server, 'close');
+    store.close();
+  }
+});

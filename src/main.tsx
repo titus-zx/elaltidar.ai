@@ -189,6 +189,24 @@ function AdminApp() {
     }
   }
 
+  async function syncKeys() {
+    setBusy('sync-keys');
+    setMessage('');
+    try {
+      const result = await api<{ checked: number; synced: number; failed: number }>('/admin/sync-keys', {
+        method: 'POST',
+        headers: { 'x-admin-token': adminToken },
+        body: JSON.stringify({}),
+      });
+      setMessage(`Sync selesai: ${result.synced}/${result.checked} key tersinkron, ${result.failed} gagal.`);
+      await loadOrders(adminToken, statusFilter);
+    } catch (error) {
+      setMessage(`Sync gagal: ${(error as Error).message}`);
+    } finally {
+      setBusy('');
+    }
+  }
+
   const pendingCount = orders.filter((order) => order.status === 'pending').length;
   const paidCount = orders.filter((order) => order.status === 'paid').length;
   const grossAmount = orders.reduce((sum, order) => sum + order.amount, 0);
@@ -231,6 +249,7 @@ function AdminApp() {
           <div className="adminToolbar">
             <button className={statusFilter === 'pending' ? 'isActive' : ''} onClick={() => setStatusFilter('pending')}>Pending</button>
             <button className={statusFilter === 'all' ? 'isActive' : ''} onClick={() => setStatusFilter('all')}>All</button>
+            <button disabled={!adminToken || busy === 'sync-keys'} onClick={syncKeys}>{busy === 'sync-keys' ? 'Syncing...' : 'Sync keys'}</button>
             <button disabled={!adminToken || busy === 'load-orders'} onClick={() => loadOrders()}>{busy === 'load-orders' ? 'Loading...' : 'Refresh'}</button>
           </div>
         </div>
