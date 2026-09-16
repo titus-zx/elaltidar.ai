@@ -29,6 +29,7 @@ export function loadConfig(envText = '') {
     litellmBaseUrl: (env.LITELLM_BASE_URL || 'https://litellm.xtrip.click').replace(/\/$/, ''),
     litellmMasterKey: env.LITELLM_MASTER_KEY || '',
     sessionCookieName: env.SESSION_COOKIE_NAME || 'elaltidar_session',
+    storeFile: env.STORE_FILE || (env.VERCEL ? '/tmp/elaltidar.sqlite' : './data/elaltidar.sqlite'),
   };
 }
 
@@ -184,7 +185,9 @@ export function createApiServer({ store = createStore(), config = loadConfig(), 
     next();
   });
 
-  app.get('/health', (req, res) => res.json({ ok: true, gateway: `${config.litellmBaseUrl}/v1` }));
+  const health = (req, res) => res.json({ ok: true, gateway: `${config.litellmBaseUrl}/v1` });
+  app.get('/health', health);
+  app.get('/api/health', health);
 
   app.get('/api/packages', (req, res) => res.json({ packages: Object.values(packages) }));
 
@@ -249,6 +252,6 @@ export function createApiServer({ store = createStore(), config = loadConfig(), 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const envText = existsSync('.env.local') ? readFileSync('.env.local', 'utf8') : '';
   const config = loadConfig(envText);
-  const app = createApiServer({ store: createStore(), config });
+  const app = createApiServer({ store: createStore({ file: config.storeFile }), config });
   app.listen(config.apiPort, () => console.log(`Elaltidar API listening on http://localhost:${config.apiPort}`));
 }

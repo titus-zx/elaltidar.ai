@@ -1,0 +1,15 @@
+{
+  "framework": "vite",
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/health", "destination": "/api/health" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/[...path].js": {
+      "runtime": "nodejs22.x"
+    }
+  }
+}
