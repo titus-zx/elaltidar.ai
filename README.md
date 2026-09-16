@@ -69,6 +69,8 @@ curl https://your-domain.vercel.app/v1/models \
 
 The response only includes models from active, non-expired paid orders for that customer.
 
+Each customer has one LiteLLM virtual key. When a customer already has a key, new approved model orders update that existing LiteLLM key through `/key/update` instead of creating another key. The key's `models` allowlist is recomputed from active, non-expired paid orders.
+
 ## Checks
 
 ```bash

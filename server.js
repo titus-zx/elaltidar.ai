@@ -97,6 +97,15 @@ function mapKey(row) {
   } : null;
 }
 
+function mapPrivateKey(row) {
+  return row ? {
+    ...mapKey(row),
+    keyHash: row.key_hash || row.keyHash,
+    litellmKey: row.litellm_key || row.litellmKey || null,
+    litellmResponse: row.litellm_response || row.litellmResponse || null,
+  } : null;
+}
+
 function verifyTelegramAuth(authData, botToken) {
   if (!botToken) return { ok: false, error: 'missing_telegram_bot_token' };
   const { hash, ...data } = authData || {};
@@ -151,12 +160,19 @@ function createPostgresStore(databaseUrl) {
         id TEXT PRIMARY KEY,
         customer_id TEXT NOT NULL REFERENCES customers(id),
         key_hash TEXT NOT NULL,
+        litellm_key TEXT,
         public_key TEXT NOT NULL,
         package_id TEXT NOT NULL,
         litellm_key_alias TEXT,
         litellm_response JSONB,
         created_at TEXT NOT NULL
       );
+      ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS litellm_key TEXT;
+      DELETE FROM api_keys older
+      USING api_keys newer
+      WHERE older.customer_id = newer.customer_id
+        AND (older.created_at < newer.created_at OR (older.created_at = newer.created_at AND older.ctid < newer.ctid));
+      CREATE UNIQUE INDEX IF NOT EXISTS api_keys_customer_id_idx ON api_keys(customer_id);
       CREATE TABLE IF NOT EXISTS orders (
         id TEXT PRIMARY KEY,
         customer_id TEXT NOT NULL REFERENCES customers(id),
@@ -221,12 +237,18 @@ function createPostgresStore(databaseUrl) {
       `, [token]);
       return mapCustomer(result.rows[0]);
     },
+    async customerById(customerId) {
+      await ensureReady();
+      const result = await pool.query('SELECT id, email, display_name, telegram_id, telegram_username, created_at FROM customers WHERE id = $1', [customerId]);
+      return mapCustomer(result.rows[0]);
+    },
     async saveKey(customerId, key, packageId, litellmResponse = {}) {
       await ensureReady();
       const row = {
         id: randomBytes(8).toString('hex'),
         customerId,
         keyHash: keyHash(key),
+        litellmKey: key,
         publicKey: maskKey(key),
         packageId,
         litellmKeyAlias: litellmResponse.key_alias || litellmResponse.key_name || null,
@@ -234,10 +256,26 @@ function createPostgresStore(databaseUrl) {
         createdAt: new Date().toISOString(),
       };
       await pool.query(`
-        INSERT INTO api_keys (id, customer_id, key_hash, public_key, package_id, litellm_key_alias, litellm_response, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [row.id, row.customerId, row.keyHash, row.publicKey, row.packageId, row.litellmKeyAlias, row.litellmResponse, row.createdAt]);
+        INSERT INTO api_keys (id, customer_id, key_hash, litellm_key, public_key, package_id, litellm_key_alias, litellm_response, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (customer_id) DO UPDATE SET
+          key_hash = EXCLUDED.key_hash,
+          litellm_key = EXCLUDED.litellm_key,
+          public_key = EXCLUDED.public_key,
+          package_id = EXCLUDED.package_id,
+          litellm_key_alias = EXCLUDED.litellm_key_alias,
+          litellm_response = EXCLUDED.litellm_response,
+          created_at = EXCLUDED.created_at
+      `, [row.id, row.customerId, row.keyHash, row.litellmKey, row.publicKey, row.packageId, row.litellmKeyAlias, row.litellmResponse, row.createdAt]);
       return row;
+    },
+    async customerKey(customerId) {
+      await ensureReady();
+      const result = await pool.query(`
+        SELECT id, customer_id, key_hash, litellm_key, public_key, package_id, litellm_key_alias, litellm_response, created_at
+        FROM api_keys WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
+      `, [customerId]);
+      return mapPrivateKey(result.rows[0]);
     },
     async createOrder(customerId, packageId) {
       await ensureReady();
@@ -346,6 +384,7 @@ function createSqliteStore(file) {
       id TEXT PRIMARY KEY,
       customer_id TEXT NOT NULL,
       key_hash TEXT NOT NULL,
+      litellm_key TEXT,
       public_key TEXT NOT NULL,
       package_id TEXT NOT NULL,
       litellm_key_alias TEXT,
@@ -371,6 +410,10 @@ function createSqliteStore(file) {
   if (!customerColumns.has('telegram_id')) db.prepare('ALTER TABLE customers ADD COLUMN telegram_id TEXT').run();
   if (!customerColumns.has('telegram_username')) db.prepare('ALTER TABLE customers ADD COLUMN telegram_username TEXT').run();
   db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS customers_telegram_id_idx ON customers(telegram_id) WHERE telegram_id IS NOT NULL').run();
+  const keyColumns = new Set(db.prepare('PRAGMA table_info(keys)').all().map((column) => column.name));
+  if (!keyColumns.has('litellm_key')) db.prepare('ALTER TABLE keys ADD COLUMN litellm_key TEXT').run();
+  db.prepare('DELETE FROM keys WHERE rowid NOT IN (SELECT MAX(rowid) FROM keys GROUP BY customer_id)').run();
+  db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS keys_customer_id_idx ON keys(customer_id)').run();
   const orderColumns = new Set(db.prepare('PRAGMA table_info(orders)').all().map((column) => column.name));
   if (!orderColumns.has('expires_at')) db.prepare('ALTER TABLE orders ADD COLUMN expires_at TEXT').run();
 
@@ -414,22 +457,42 @@ function createSqliteStore(file) {
       `).get(token);
       return mapCustomer(customer);
     },
+    customerById(customerId) {
+      const customer = db.prepare('SELECT id, email, display_name AS displayName, telegram_id AS telegramId, telegram_username AS telegramUsername, created_at AS createdAt FROM customers WHERE id = ?').get(customerId);
+      return mapCustomer(customer);
+    },
     saveKey(customerId, key, packageId, litellmResponse = {}) {
       const row = {
         id: randomBytes(8).toString('hex'),
         customerId,
         keyHash: keyHash(key),
+        litellmKey: key,
         publicKey: maskKey(key),
         packageId,
         litellmKeyAlias: litellmResponse.key_alias || litellmResponse.key_name || null,
         litellmResponse: JSON.stringify(litellmResponse),
         createdAt: new Date().toISOString(),
       };
+      const existing = db.prepare('SELECT id FROM keys WHERE customer_id = ?').get(customerId);
+      if (existing) {
+        db.prepare(`
+          UPDATE keys SET key_hash = ?, litellm_key = ?, public_key = ?, package_id = ?, litellm_key_alias = ?, litellm_response = ?, created_at = ?
+          WHERE customer_id = ?
+        `).run(row.keyHash, row.litellmKey, row.publicKey, row.packageId, row.litellmKeyAlias, row.litellmResponse, row.createdAt, row.customerId);
+        return { ...row, id: existing.id };
+      }
       db.prepare(`
-        INSERT INTO keys (id, customer_id, key_hash, public_key, package_id, litellm_key_alias, litellm_response, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(row.id, row.customerId, row.keyHash, row.publicKey, row.packageId, row.litellmKeyAlias, row.litellmResponse, row.createdAt);
+        INSERT INTO keys (id, customer_id, key_hash, litellm_key, public_key, package_id, litellm_key_alias, litellm_response, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(row.id, row.customerId, row.keyHash, row.litellmKey, row.publicKey, row.packageId, row.litellmKeyAlias, row.litellmResponse, row.createdAt);
       return row;
+    },
+    customerKey(customerId) {
+      const row = db.prepare(`
+        SELECT id, customer_id AS customerId, key_hash AS keyHash, litellm_key AS litellmKey, public_key AS publicKey, package_id AS packageId, litellm_key_alias AS litellmKeyAlias, litellm_response AS litellmResponse, created_at AS createdAt
+        FROM keys WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1
+      `).get(customerId);
+      return mapPrivateKey(row);
     },
     createOrder(customerId, packageId) {
       const pkg = packages[packageId] || packages.starter;
@@ -540,6 +603,41 @@ async function readLiteLLMUsage({ config, latestKey, fetchImpl }) {
   return res.json();
 }
 
+function activeKeyParams(activeEntitlements) {
+  const activeModels = Array.from(new Set(activeEntitlements.map((item) => item.package.model)));
+  const totalBudget = activeEntitlements.reduce((sum, item) => sum + item.order.amount, 0);
+  const latestExpiry = activeEntitlements.reduce((latest, item) => item.order.expiresAt > latest ? item.order.expiresAt : latest, activeEntitlements[0].order.expiresAt);
+  const remainingDays = Math.max(1, Math.ceil((new Date(latestExpiry).getTime() - Date.now()) / 86400000));
+  return { activeModels, totalBudget, latestExpiry, remainingDays };
+}
+
+async function syncCustomerLiteLLMKey({ store, config, customer, fetchImpl }) {
+  if (!config.litellmMasterKey) return { synced: false, reason: 'missing_litellm_master_key' };
+  const existingKey = await store.customerKey(customer.id);
+  if (!existingKey?.litellmKey) return { synced: false, reason: 'missing_customer_key' };
+  const activeEntitlements = await store.availableModels(customer.id);
+  const params = activeEntitlements.length > 0 ? activeKeyParams(activeEntitlements) : { activeModels: [], totalBudget: 0, remainingDays: 1 };
+  const llmRes = await fetchImpl(`${config.litellmBaseUrl}/key/update`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${config.litellmMasterKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      key: existingKey.litellmKey,
+      models: params.activeModels,
+      max_budget: params.totalBudget,
+      duration: `${params.remainingDays}d`,
+      metadata: { customer_id: customer.id, customer_email: customer.email, package_ids: activeEntitlements.map((item) => item.package.id), brand: 'ElaltidarAI' },
+    }),
+  });
+  const payload = await llmRes.json();
+  if (!llmRes.ok) {
+    const error = new Error('litellm_key_update_failed');
+    error.status = llmRes.status;
+    error.detail = payload;
+    throw error;
+  }
+  return { synced: true, keyMeta: mapKey(existingKey), models: params.activeModels, detail: payload };
+}
+
 export function createApiServer({ store, config = loadConfig(), fetchImpl = fetch } = {}) {
   const appStore = store || createStore({ file: config.storeFile, databaseUrl: config.databaseUrl });
   const app = express();
@@ -620,7 +718,13 @@ export function createApiServer({ store, config = loadConfig(), fetchImpl = fetc
     if (!isAdmin(req, config)) return res.status(401).json({ error: 'admin_unauthorized' });
     const order = await appStore.approveOrder(req.params.orderId);
     if (!order) return res.status(404).json({ error: 'order_not_found' });
-    return res.json({ order });
+    const customer = await appStore.customerById(order.customerId);
+    try {
+      const keySync = customer ? await syncCustomerLiteLLMKey({ store: appStore, config, customer, fetchImpl }) : { synced: false, reason: 'customer_not_found' };
+      return res.json({ order, keySync });
+    } catch (error) {
+      return res.status(error.status || 502).json({ error: 'litellm_key_sync_failed', detail: error.detail || String(error.message || error), order });
+    }
   });
 
   app.post('/api/keys', async (req, res) => {
@@ -630,10 +734,12 @@ export function createApiServer({ store, config = loadConfig(), fetchImpl = fetc
 
     const activeEntitlements = await appStore.availableModels(customer.id);
     if (activeEntitlements.length === 0) return res.status(402).json({ error: 'no_active_model_entitlement' });
-    const activeModels = Array.from(new Set(activeEntitlements.map((item) => item.package.model)));
-    const totalBudget = activeEntitlements.reduce((sum, item) => sum + item.order.amount, 0);
-    const latestExpiry = activeEntitlements.reduce((latest, item) => item.order.expiresAt > latest ? item.order.expiresAt : latest, activeEntitlements[0].order.expiresAt);
-    const remainingDays = Math.max(1, Math.ceil((new Date(latestExpiry).getTime() - Date.now()) / 86400000));
+    const existingKey = await appStore.customerKey(customer.id);
+    if (existingKey?.litellmKey) {
+      const keySync = await syncCustomerLiteLLMKey({ store: appStore, config, customer, fetchImpl });
+      return res.json({ key: null, keyMeta: mapKey(existingKey), reused: true, keySync });
+    }
+    const { activeModels, totalBudget, remainingDays } = activeKeyParams(activeEntitlements);
     const packageId = activeEntitlements[0].package.id;
     const keyAlias = `elaltidar-${customer.id}-multi`;
     const llmRes = await fetchImpl(`${config.litellmBaseUrl}/key/generate`, {
@@ -653,7 +759,7 @@ export function createApiServer({ store, config = loadConfig(), fetchImpl = fetc
     const key = payload.key || payload.token;
     if (!key) return res.status(502).json({ error: 'litellm_key_missing', detail: payload });
     const keyMeta = await appStore.saveKey(customer.id, key, packageId, { ...payload, key_alias: keyAlias });
-    return res.json({ key, keyMeta });
+    return res.json({ key, keyMeta: mapKey(keyMeta) });
   });
 
   return app;

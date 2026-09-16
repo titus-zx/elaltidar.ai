@@ -226,3 +226,58 @@ test('paid package entitlements appear in dashboard and v1 models for customer a
     store.close();
   }
 });
+
+test('existing customer key is reused and synced when new model orders are approved', async () => {
+  const calls = [];
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/key/update')) {
+      return new Response(JSON.stringify({ updated: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ key: 'sk-one-customer-key', key_name: 'elaltidar-titus' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const store = createStore({ file: ':memory:' });
+  const app = createApiServer({ store, fetchImpl: fakeFetch, config: { litellmBaseUrl: 'https://litellm.test', litellmMasterKey: 'master', allowDevLogin: true, adminToken: 'admin-secret' } });
+  const server = await listen(app);
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const login = await post(base, '/api/login', { email: 'titus@example.com' });
+    const starter = await postWithHeaders(base, '/api/orders', { packageId: 'starter' }, { authorization: `Bearer ${login.body.token}` });
+    await postWithHeaders(base, `/api/admin/orders/${starter.body.order.id}/approve`, {}, { 'x-admin-token': 'admin-secret' });
+
+    const firstKey = await post(base, '/api/keys', { token: login.body.token });
+    assert.equal(firstKey.status, 200);
+    assert.equal(firstKey.body.key, 'sk-one-customer-key');
+
+    const pro = await postWithHeaders(base, '/api/orders', { packageId: 'pro' }, { authorization: `Bearer ${login.body.token}` });
+    const syncedApproval = await postWithHeaders(base, `/api/admin/orders/${pro.body.order.id}/approve`, {}, { 'x-admin-token': 'admin-secret' });
+    assert.equal(syncedApproval.status, 200);
+    assert.equal(syncedApproval.body.keySync.synced, true);
+
+    const generateCalls = calls.filter((call) => call.url.endsWith('/key/generate'));
+    const updateCalls = calls.filter((call) => call.url.endsWith('/key/update'));
+    assert.equal(generateCalls.length, 1);
+    assert.equal(updateCalls.length, 1);
+    const updateBody = JSON.parse(updateCalls[0].options.body);
+    assert.equal(updateBody.key, 'sk-one-customer-key');
+    assert.deepEqual(updateBody.models.sort(), ['gemini-2.0-flash', 'gpt-4.1-mini']);
+
+    const reused = await post(base, '/api/keys', { token: login.body.token });
+    assert.equal(reused.status, 200);
+    assert.equal(reused.body.key, null);
+    assert.equal(reused.body.reused, true);
+    assert.equal(reused.body.keyMeta.publicKey, 'sk-one-custo....-key');
+    assert.equal(reused.body.keyMeta.litellmKey, undefined);
+    assert.equal(calls.filter((call) => call.url.endsWith('/key/generate')).length, 1);
+  } finally {
+    server.close();
+    await once(server, 'close');
+    store.close();
+  }
+});

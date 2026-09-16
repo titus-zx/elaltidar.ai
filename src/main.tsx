@@ -542,13 +542,17 @@ function App() {
     setBusy(`key-${packageId}`);
     setMessage('');
     try {
-      const data = await api<{ key: string; keyMeta: KeyMeta }>('/keys', {
+      const data = await api<{ key: string | null; keyMeta: KeyMeta; reused?: boolean }>('/keys', {
         method: 'POST',
         headers: { authorization: `Bearer ${token}` },
         body: JSON.stringify({ packageId }),
       });
-      setPlainKey(data.key);
-      setMessage('API key LiteLLM berhasil dibuat. Simpan key penuh sekarang, setelah refresh hanya versi masked yang tampil.');
+      if (data.key) {
+        setPlainKey(data.key);
+        setMessage('API key LiteLLM berhasil dibuat. Simpan key penuh sekarang, setelah refresh hanya versi masked yang tampil.');
+      } else {
+        setMessage('API key existing berhasil di-sync dengan model aktif terbaru. Key penuh tidak ditampilkan ulang.');
+      }
       await refreshDashboard();
     } catch (error) {
       setMessage(`Generate key gagal: ${(error as Error).message}`);
