@@ -56,6 +56,29 @@ const FALLBACK_PACKAGES: Package[] = [
 const API_BASE = '/api';
 const GATEWAY_BASE = 'https://litellm.xtrip.click/v1';
 
+function modelMark(label: string, color: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${color}"/><circle cx="47" cy="17" r="7" fill="#fffdf7" opacity=".32"/><text x="32" y="39" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="800" fill="#fffdf7">${label}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const providerMeta: Record<string, { name: string; icon: string; accent: string }> = {
+  starter: { name: 'OpenAI', icon: modelMark('O', '#10a37f'), accent: '#10a37f' },
+  claude: { name: 'Anthropic', icon: modelMark('A', '#d97757'), accent: '#d97757' },
+  pro: { name: 'Gemini', icon: modelMark('G', '#3b82f6'), accent: '#3b82f6' },
+  scale: { name: 'DeepSeek', icon: modelMark('D', '#4f46e5'), accent: '#4f46e5' },
+  qwen: { name: 'Qwen', icon: modelMark('Q', '#f97316'), accent: '#f97316' },
+};
+
+const modelLogos = [
+  providerMeta.starter,
+  providerMeta.claude,
+  providerMeta.pro,
+  providerMeta.scale,
+  providerMeta.qwen,
+  { name: 'Meta', icon: modelMark('M', '#2563eb'), accent: '#2563eb' },
+  { name: 'Z.ai', icon: modelMark('Z', '#64748b'), accent: '#64748b' },
+];
+
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -68,6 +91,10 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 function formatRupiah(amount: number) {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
+}
+
+function metaForPackage(packageId: string) {
+  return providerMeta[packageId] || { name: 'Model Pool', icon: modelMark('AI', '#15605b'), accent: '#15605b' };
 }
 
 function App() {
@@ -195,34 +222,41 @@ function App() {
     <main id="top">
       <section className="hero">
         <div>
-          <p className="eyebrow">AI API Platform</p>
-          <h1>Jual akses multi-model AI lewat satu API.</h1>
-          <p className="lead">Storefront token, member dashboard, dan OpenAI-compatible endpoint di atas LiteLLM existing: <code>{GATEWAY_BASE}</code>.</p>
+          <p className="eyebrow">ElaltidarAI API</p>
+          <h1>Akses model AI terbaik, beli token, langsung pakai.</h1>
+          <p className="lead">Platform API AI Indonesia dengan paket token, dashboard member, dan endpoint OpenAI-compatible di atas gateway LiteLLM sendiri.</p>
           <div className="actions">
             <a className="primary" href="#pricing">Lihat paket</a>
             <a className="secondary" href="#dashboard">Buka dashboard</a>
           </div>
         </div>
-        <div className="heroCard">
-          <span>Live gateway</span>
-          <strong>litellm.xtrip.click</strong>
-          <p>Routing model, API key, budget, dan usage tetap di LiteLLM. Storefront menjadi layer bisnis dan customer dashboard.</p>
+        <div className="heroCard" aria-label="ElaltidarAI live platform preview">
+          <div className="heroCardTop">
+            <span>Live gateway</span>
+            <b>Online</b>
+          </div>
+          <strong>1 endpoint untuk banyak model.</strong>
+          <p><code>{GATEWAY_BASE}</code></p>
+          <div className="heroStats">
+            <div><b>{packages.length}</b><span>Model paket</span></div>
+            <div><b>Bearer</b><span>API key</span></div>
+            <div><b>IDR</b><span>Token topup</span></div>
+          </div>
         </div>
       </section>
 
       <section className="modelRail" aria-label="Supported AI models">
-        <p>POWERING LEADING AI MODELS</p>
+        <p>DIDUKUNG MODEL AI TERDEPAN</p>
         <div>
-          <span>OpenAI</span><span>Anthropic</span><span>Gemini</span><span>DeepSeek</span><span>Qwen</span><span>GLM</span><span>Meta</span>
-          <span>OpenAI</span><span>Anthropic</span><span>Gemini</span><span>DeepSeek</span><span>Qwen</span><span>GLM</span><span>Meta</span>
+          {[...modelLogos, ...modelLogos].map((item, index) => <span key={`${item.name}-${index}`}><img src={item.icon} alt="" />{item.name}</span>)}
         </div>
       </section>
 
       <section className="stats">
-        <div><strong>1 API</strong><span>OpenAI-compatible</span></div>
-        <div><strong>{packages.length}</strong><span>Token packages</span></div>
-        <div><strong>LiteLLM</strong><span>Budget & key backend</span></div>
-        <div><strong>SQLite</strong><span>MVP customer data</span></div>
+        <div><strong>1 API</strong><span>Format OpenAI-compatible</span></div>
+        <div><strong>{packages.length}</strong><span>Paket token aktif</span></div>
+        <div><strong>Postgres</strong><span>Data customer permanen</span></div>
+        <div><strong>LiteLLM</strong><span>Key, budget, dan routing</span></div>
       </section>
 
       <section id="features" className="section">
@@ -237,15 +271,25 @@ function App() {
 
       <section id="pricing" className="section">
         <p className="eyebrow">Pricing</p>
-        <h2>Pilih quota, lanjut dari dashboard.</h2>
+        <div className="sectionHead">
+          <h2>Pilih paket token.</h2>
+          <div className="currencySwitch"><span>Rp</span><b>IDR</b></div>
+        </div>
         <div className="plans">
-          {packages.map((item) => <article className="plan" key={item.id}>
-            <span>{item.model}</span>
+          {packages.map((item) => {
+            const meta = metaForPackage(item.id);
+            return <article className="plan" key={item.id} style={{ '--accent': meta.accent } as React.CSSProperties}>
+            <div className="planLogo"><img src={meta.icon} alt="" /><span>{meta.name}</span></div>
             <h3>{item.name}</h3>
             <p>{item.quota}</p>
+            <ul>
+              <li>{item.quota.split(' / ')[0]}</li>
+              <li>Aktif {item.durationDays} hari</li>
+              <li>Akses via OpenAI-compatible API</li>
+            </ul>
             <strong>{item.price}</strong>
             <button disabled={busy === `order-${item.id}`} onClick={() => createOrder(item.id)}>{busy === `order-${item.id}` ? 'Membuat...' : 'Buat order'}</button>
-          </article>)}
+          </article>})}
         </div>
       </section>
 
@@ -261,6 +305,7 @@ function App() {
           {message && <p className="notice">{message}</p>}
         </div>
         <div className="panel">
+          <div className="consoleBar"><span></span><span></span><span></span><b>member console</b></div>
           <div className="memberTop">
             <div><span>Member</span><strong>{dashboard?.customer.email || 'Belum login'}</strong></div>
             <div><span>Plan aktif</span><strong>{dashboard?.activePackage?.packageName || 'Belum ada'}</strong></div>
