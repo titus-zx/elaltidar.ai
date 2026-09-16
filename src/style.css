@@ -127,14 +127,9 @@ a {
 
 .telegramHeaderLogin {
   display: flex;
-  min-height: 44px;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid rgba(23, 32, 27, 0.12);
-  border-radius: 8px;
-  padding: 5px 8px;
-  background: #17201b;
 }
 
 .telegramHeaderLogin iframe {
