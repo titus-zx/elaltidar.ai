@@ -1,8 +1,11 @@
 import express from 'express';
 import Database from 'better-sqlite3';
+import pg from 'pg';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
+
+const { Pool } = pg;
 
 export const packages = {
   starter: { id: 'starter', name: 'GPT-4.1 Mini 10M', model: 'gpt-4.1-mini', maxBudget: 29000, durationDays: 3, quota: '10M tokens / 3 hari', price: 'Rp 29.000' },
@@ -30,6 +33,7 @@ export function loadConfig(envText = '') {
     litellmMasterKey: env.LITELLM_MASTER_KEY || '',
     sessionCookieName: env.SESSION_COOKIE_NAME || 'elaltidar_session',
     storeFile: env.STORE_FILE || (env.VERCEL ? '/tmp/elaltidar.sqlite' : './data/elaltidar.sqlite'),
+    databaseUrl: env.DATABASE_URL || env.POSTGRES_URL || '',
   };
 }
 
@@ -41,7 +45,160 @@ function keyHash(key) {
   return createHash('sha256').update(key).digest('hex');
 }
 
-export function createStore({ file = './data/elaltidar.sqlite' } = {}) {
+function mapCustomer(row) {
+  return row ? { id: row.id, email: row.email, createdAt: row.created_at || row.createdAt } : null;
+}
+
+function mapOrder(row) {
+  return row ? {
+    id: row.id,
+    customerId: row.customer_id || row.customerId,
+    packageId: row.package_id || row.packageId,
+    packageName: row.package_name || row.packageName,
+    amount: row.amount,
+    status: row.status,
+    createdAt: row.created_at || row.createdAt,
+    paidAt: row.paid_at || row.paidAt,
+  } : null;
+}
+
+function mapKey(row) {
+  return row ? {
+    id: row.id,
+    customerId: row.customer_id || row.customerId,
+    publicKey: row.public_key || row.publicKey,
+    packageId: row.package_id || row.packageId,
+    litellmKeyAlias: row.litellm_key_alias || row.litellmKeyAlias,
+    createdAt: row.created_at || row.createdAt,
+  } : null;
+}
+
+function createPostgresStore(databaseUrl) {
+  const pool = new Pool({ connectionString: databaseUrl, ssl: databaseUrl.includes('localhost') ? false : { rejectUnauthorized: false } });
+  let ready;
+  const ensureReady = () => {
+    ready ||= pool.query(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL REFERENCES customers(id),
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL REFERENCES customers(id),
+        key_hash TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        package_id TEXT NOT NULL,
+        litellm_key_alias TEXT,
+        litellm_response JSONB,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS orders (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL REFERENCES customers(id),
+        package_id TEXT NOT NULL,
+        package_name TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        paid_at TEXT
+      );
+    `);
+    return ready;
+  };
+
+  return {
+    async close() {
+      await pool.end();
+    },
+    async upsertCustomer(email) {
+      await ensureReady();
+      const normalizedEmail = email.toLowerCase();
+      const existing = await pool.query('SELECT id, email, created_at FROM customers WHERE email = $1', [normalizedEmail]);
+      if (existing.rows[0]) return mapCustomer(existing.rows[0]);
+      const customer = { id: randomBytes(8).toString('hex'), email: normalizedEmail, createdAt: new Date().toISOString() };
+      await pool.query('INSERT INTO customers (id, email, created_at) VALUES ($1, $2, $3)', [customer.id, customer.email, customer.createdAt]);
+      return customer;
+    },
+    async createSession(customerId) {
+      await ensureReady();
+      const session = { token: randomBytes(32).toString('hex'), customerId, createdAt: new Date().toISOString() };
+      await pool.query('INSERT INTO sessions (token, customer_id, created_at) VALUES ($1, $2, $3)', [session.token, session.customerId, session.createdAt]);
+      return session;
+    },
+    async customerByToken(token) {
+      await ensureReady();
+      if (!token) return null;
+      const result = await pool.query(`
+        SELECT customers.id, customers.email, customers.created_at
+        FROM sessions
+        JOIN customers ON customers.id = sessions.customer_id
+        WHERE sessions.token = $1
+      `, [token]);
+      return mapCustomer(result.rows[0]);
+    },
+    async saveKey(customerId, key, packageId, litellmResponse = {}) {
+      await ensureReady();
+      const row = {
+        id: randomBytes(8).toString('hex'),
+        customerId,
+        keyHash: keyHash(key),
+        publicKey: maskKey(key),
+        packageId,
+        litellmKeyAlias: litellmResponse.key_alias || litellmResponse.key_name || null,
+        litellmResponse,
+        createdAt: new Date().toISOString(),
+      };
+      await pool.query(`
+        INSERT INTO api_keys (id, customer_id, key_hash, public_key, package_id, litellm_key_alias, litellm_response, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [row.id, row.customerId, row.keyHash, row.publicKey, row.packageId, row.litellmKeyAlias, row.litellmResponse, row.createdAt]);
+      return row;
+    },
+    async createOrder(customerId, packageId) {
+      await ensureReady();
+      const pkg = packages[packageId] || packages.starter;
+      const row = { id: randomBytes(8).toString('hex'), customerId, packageId: pkg.id, packageName: pkg.name, amount: pkg.maxBudget, status: 'pending', createdAt: new Date().toISOString(), paidAt: null };
+      await pool.query(`
+        INSERT INTO orders (id, customer_id, package_id, package_name, amount, status, created_at, paid_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [row.id, row.customerId, row.packageId, row.packageName, row.amount, row.status, row.createdAt, row.paidAt]);
+      return row;
+    },
+    async approveOrder(orderId) {
+      await ensureReady();
+      const paidAt = new Date().toISOString();
+      const result = await pool.query(`
+        UPDATE orders SET status = 'paid', paid_at = $1 WHERE id = $2
+        RETURNING id, customer_id, package_id, package_name, amount, status, created_at, paid_at
+      `, [paidAt, orderId]);
+      return mapOrder(result.rows[0]);
+    },
+    async dashboard(customer) {
+      await ensureReady();
+      const latestKey = await pool.query(`
+        SELECT id, customer_id, public_key, package_id, litellm_key_alias, created_at
+        FROM api_keys WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
+      `, [customer.id]);
+      const activePackage = await pool.query(`
+        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at
+        FROM orders WHERE customer_id = $1 AND status = 'paid' ORDER BY paid_at DESC LIMIT 1
+      `, [customer.id]);
+      const orders = await pool.query(`
+        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at
+        FROM orders WHERE customer_id = $1 ORDER BY created_at DESC
+      `, [customer.id]);
+      return { customer, activePackage: mapOrder(activePackage.rows[0]), latestKey: mapKey(latestKey.rows[0]), orders: orders.rows.map(mapOrder) };
+    },
+  };
+}
+
+function createSqliteStore(file) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
   const db = new Database(file);
   db.pragma('journal_mode = WAL');
@@ -154,9 +311,13 @@ export function createStore({ file = './data/elaltidar.sqlite' } = {}) {
         SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt
         FROM orders WHERE customer_id = ? ORDER BY created_at DESC
       `).all(customer.id);
-      return { customer, activePackage, latestKey, orders };
+      return { customer, activePackage: mapOrder(activePackage), latestKey: mapKey(latestKey), orders: orders.map(mapOrder) };
     },
   };
+}
+
+export function createStore({ file = './data/elaltidar.sqlite', databaseUrl = '' } = {}) {
+  return databaseUrl ? createPostgresStore(databaseUrl) : createSqliteStore(file);
 }
 
 function getToken(req, body = {}) {
@@ -174,7 +335,8 @@ async function readLiteLLMUsage({ config, latestKey, fetchImpl }) {
   return res.json();
 }
 
-export function createApiServer({ store = createStore(), config = loadConfig(), fetchImpl = fetch } = {}) {
+export function createApiServer({ store, config = loadConfig(), fetchImpl = fetch } = {}) {
+  const appStore = store || createStore({ file: config.storeFile, databaseUrl: config.databaseUrl });
   const app = express();
   app.use(express.json());
   app.use((req, res, next) => {
@@ -191,37 +353,37 @@ export function createApiServer({ store = createStore(), config = loadConfig(), 
 
   app.get('/api/packages', (req, res) => res.json({ packages: Object.values(packages) }));
 
-  app.post('/api/login', (req, res) => {
+  app.post('/api/login', async (req, res) => {
     if (!/^\S+@\S+\.\S+$/.test(req.body.email || '')) return res.status(400).json({ error: 'invalid_email' });
-    const customer = store.upsertCustomer(req.body.email);
-    const session = store.createSession(customer.id);
+    const customer = await appStore.upsertCustomer(req.body.email);
+    const session = await appStore.createSession(customer.id);
     return res.json({ token: session.token, customer });
   });
 
   app.get('/api/dashboard', async (req, res) => {
-    const customer = store.customerByToken(getToken(req));
+    const customer = await appStore.customerByToken(getToken(req));
     if (!customer) return res.status(401).json({ error: 'unauthorized' });
-    const dashboard = store.dashboard(customer);
+    const dashboard = await appStore.dashboard(customer);
     const usage = await readLiteLLMUsage({ config, latestKey: dashboard.latestKey, fetchImpl });
     return res.json({ ...dashboard, usage, gateway: { baseUrl: `${config.litellmBaseUrl}/v1` }, packages: Object.values(packages) });
   });
 
-  app.post('/api/orders', (req, res) => {
-    const customer = store.customerByToken(getToken(req, req.body));
+  app.post('/api/orders', async (req, res) => {
+    const customer = await appStore.customerByToken(getToken(req, req.body));
     if (!customer) return res.status(401).json({ error: 'unauthorized' });
-    return res.json({ order: store.createOrder(customer.id, req.body.packageId || 'starter') });
+    return res.json({ order: await appStore.createOrder(customer.id, req.body.packageId || 'starter') });
   });
 
-  app.post('/api/orders/:orderId/approve', (req, res) => {
-    const customer = store.customerByToken(getToken(req, req.body));
+  app.post('/api/orders/:orderId/approve', async (req, res) => {
+    const customer = await appStore.customerByToken(getToken(req, req.body));
     if (!customer) return res.status(401).json({ error: 'unauthorized' });
-    const order = store.approveOrder(req.params.orderId);
+    const order = await appStore.approveOrder(req.params.orderId);
     if (!order || order.customerId !== customer.id) return res.status(404).json({ error: 'order_not_found' });
     return res.json({ order });
   });
 
   app.post('/api/keys', async (req, res) => {
-    const customer = store.customerByToken(getToken(req, req.body));
+    const customer = await appStore.customerByToken(getToken(req, req.body));
     if (!customer) return res.status(401).json({ error: 'unauthorized' });
     if (!config.litellmMasterKey) return res.status(500).json({ error: 'missing_litellm_master_key' });
 
@@ -242,7 +404,7 @@ export function createApiServer({ store = createStore(), config = loadConfig(), 
     if (!llmRes.ok) return res.status(llmRes.status).json({ error: 'litellm_key_generate_failed', detail: payload });
     const key = payload.key || payload.token;
     if (!key) return res.status(502).json({ error: 'litellm_key_missing', detail: payload });
-    const keyMeta = store.saveKey(customer.id, key, pkg.id, { ...payload, key_alias: keyAlias });
+    const keyMeta = await appStore.saveKey(customer.id, key, pkg.id, { ...payload, key_alias: keyAlias });
     return res.json({ key, keyMeta });
   });
 
@@ -252,6 +414,6 @@ export function createApiServer({ store = createStore(), config = loadConfig(), 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const envText = existsSync('.env.local') ? readFileSync('.env.local', 'utf8') : '';
   const config = loadConfig(envText);
-  const app = createApiServer({ store: createStore({ file: config.storeFile }), config });
+  const app = createApiServer({ store: createStore({ file: config.storeFile, databaseUrl: config.databaseUrl }), config });
   app.listen(config.apiPort, () => console.log(`Elaltidar API listening on http://localhost:${config.apiPort}`));
 }
