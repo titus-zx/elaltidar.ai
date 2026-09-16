@@ -45,6 +45,21 @@ type Dashboard = {
   usage: unknown | null;
 };
 
+type PublicConfig = {
+  allowDevLogin: boolean;
+  telegramBotUsername: string;
+};
+
+type TelegramAuth = {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+};
+
 const FALLBACK_PACKAGES: Package[] = [
   { id: 'starter', name: 'GPT-4.1 Mini 10M', model: 'gpt-4.1-mini', quota: '10M tokens / 3 hari', price: 'Rp 29.000', maxBudget: 29000, durationDays: 3 },
   { id: 'claude', name: 'Claude Haiku 3.5 10M', model: 'claude-3-5-haiku', quota: '10M tokens / 3 hari', price: 'Rp 39.000', maxBudget: 39000, durationDays: 3 },
@@ -101,6 +116,7 @@ function App() {
   const [email, setEmail] = useState('');
   const [token, setToken] = useState(() => localStorage.getItem('elaltidar_token') || '');
   const [packages, setPackages] = useState(FALLBACK_PACKAGES);
+  const [publicConfig, setPublicConfig] = useState<PublicConfig>({ allowDevLogin: false, telegramBotUsername: '' });
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [plainKey, setPlainKey] = useState('');
   const [busy, setBusy] = useState('');
@@ -114,10 +130,47 @@ function App() {
   }
 
   useEffect(() => {
+    api<PublicConfig>('/config')
+      .then(setPublicConfig)
+      .catch(() => setPublicConfig({ allowDevLogin: false, telegramBotUsername: '' }));
     api<{ packages: Package[] }>('/packages')
       .then((data) => setPackages(data.packages))
       .catch(() => setPackages(FALLBACK_PACKAGES));
   }, []);
+
+  useEffect(() => {
+    if (!publicConfig.telegramBotUsername) return;
+    const container = document.getElementById('telegram-login-slot');
+    if (!container) return;
+    container.innerHTML = '';
+    (window as unknown as { onTelegramAuth: (user: TelegramAuth) => void }).onTelegramAuth = async (user) => {
+      setBusy('telegram');
+      setMessage('');
+      try {
+        const data = await api<{ token: string; customer: Customer }>('/auth/telegram', {
+          method: 'POST',
+          body: JSON.stringify(user),
+        });
+        localStorage.setItem('elaltidar_token', data.token);
+        setToken(data.token);
+        setMessage('Login Telegram berhasil. Session tersimpan di browser ini.');
+        await refreshDashboard(data.token);
+      } catch (error) {
+        setMessage(`Login Telegram gagal: ${(error as Error).message}`);
+      } finally {
+        setBusy('');
+      }
+    };
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', publicConfig.telegramBotUsername);
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-userpic', 'false');
+    script.setAttribute('data-request-access', 'write');
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+    container.appendChild(script);
+  }, [publicConfig.telegramBotUsername]);
 
   useEffect(() => {
     if (!token) return;
@@ -161,24 +214,6 @@ function App() {
       await refreshDashboard();
     } catch (error) {
       setMessage(`Order gagal: ${(error as Error).message}`);
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function approveOrder(orderId: string) {
-    setBusy(`approve-${orderId}`);
-    setMessage('');
-    try {
-      await api<{ order: Order }>(`/orders/${orderId}/approve`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${token}` },
-        body: JSON.stringify({ token }),
-      });
-      setMessage('Order ditandai paid untuk MVP manual approval.');
-      await refreshDashboard();
-    } catch (error) {
-      setMessage(`Approve gagal: ${(error as Error).message}`);
     } finally {
       setBusy('');
     }
@@ -297,11 +332,15 @@ function App() {
         <div>
           <p className="eyebrow">Member dashboard</p>
           <h2>Customer area MVP</h2>
-          <p>Login email untuk membuat order, approve manual saat pembayaran sudah dicek, lalu generate key LiteLLM dengan quota paket.</p>
-          <form className="loginForm" onSubmit={login}>
-            <input type="email" placeholder="email customer" value={email} onChange={(event) => setEmail(event.target.value)} required />
-            <button disabled={busy === 'login'}>{busy === 'login' ? 'Masuk...' : 'Login'}</button>
-          </form>
+          <p>Login Telegram untuk membuat order, menunggu approval admin, lalu generate key LiteLLM dengan quota paket.</p>
+          <div className="telegramLogin">
+            <div id="telegram-login-slot"></div>
+            {!publicConfig.telegramBotUsername && <span>Set TELEGRAM_BOT_USERNAME di Vercel untuk mengaktifkan tombol Telegram.</span>}
+          </div>
+          {publicConfig.allowDevLogin && <form className="loginForm" onSubmit={login}>
+            <input type="email" placeholder="email dev login" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <button disabled={busy === 'login'}>{busy === 'login' ? 'Masuk...' : 'Dev login'}</button>
+          </form>}
           {message && <p className="notice">{message}</p>}
         </div>
         <div className="panel">
@@ -318,12 +357,12 @@ function App() {
             <div><span>Order terakhir</span><b>{latestOrder?.packageName || 'Belum ada order'}</b><em>{latestOrder?.status || 'idle'}</em></div>
             <i><u style={{ width: latestOrder?.status === 'paid' ? '100%' : latestOrder ? '50%' : '10%' }} /></i>
           </div>
+          {latestOrder?.status === 'pending' && <p className="approvalNote">Order sedang menunggu approval admin setelah pembayaran dikonfirmasi.</p>}
           <div className="keyBox">
             <span>API Key</span>
             <code>{plainKey || dashboard?.latestKey?.publicKey || 'Belum dibuat'}</code>
             <button disabled={!token || busy === `key-${selectedPackage}`} onClick={() => createKey(selectedPackage)}>{busy === `key-${selectedPackage}` ? 'Generate...' : 'Generate key'}</button>
           </div>
-          {latestOrder?.status === 'pending' && <button className="wideButton" disabled={busy === `approve-${latestOrder.id}`} onClick={() => approveOrder(latestOrder.id)}>{busy === `approve-${latestOrder.id}` ? 'Approving...' : 'Approve manual order'}</button>}
         </div>
       </section>
 

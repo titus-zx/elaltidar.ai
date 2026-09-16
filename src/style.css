@@ -500,6 +500,23 @@ footer {
   margin-top: 24px;
 }
 
+.telegramLogin {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+  border: 1px solid rgba(23, 32, 27, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fffdf7;
+}
+
+.telegramLogin span,
+.approvalNote {
+  color: #54645d;
+  font-size: 14px;
+  font-weight: 800;
+}
+
 .loginForm input {
   min-width: 0;
   min-height: 44px;
@@ -518,6 +535,14 @@ footer {
   background: rgba(21, 96, 91, 0.09);
   color: #24483f;
   font-weight: 700;
+}
+
+.approvalNote {
+  margin: 16px 0 0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: rgba(243, 178, 63, 0.14);
+  color: #77531b;
 }
 
 .panel {

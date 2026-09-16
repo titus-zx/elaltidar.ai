@@ -20,9 +20,13 @@ Copy `.env.example` to `.env.local` locally. On Vercel, set these project enviro
 LITELLM_BASE_URL=https://litellm.xtrip.click
 LITELLM_MASTER_KEY=your-litellm-master-key
 DATABASE_URL=postgres://user:password@host:5432/elaltidar
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_BOT_USERNAME=your_bot_username
+ADMIN_TOKEN=long-random-admin-token
 ```
 
 `DATABASE_URL` can come from Vercel Postgres, Neon, Supabase, or another managed Postgres provider. Without `DATABASE_URL`, the API falls back to local SQLite.
+Email dev login is disabled on Vercel unless `ALLOW_DEV_LOGIN=true` is explicitly set. Production customer login should use Telegram Login.
 
 ## Vercel deploy
 
@@ -33,8 +37,26 @@ Import the GitHub repo into Vercel. The repo includes `vercel.json` with:
 - Output directory: `dist`
 - Serverless API: `api/[...path].js`
 - Persistent store: Postgres via `DATABASE_URL`
+- Customer auth: Telegram Login via `TELEGRAM_BOT_TOKEN`
+- Admin approval: protected by `ADMIN_TOKEN`
 
 The API bootstraps the required Postgres tables automatically on first request. SQLite remains available for local development and tests only.
+
+## Admin approval
+
+Customer-created orders stay `pending`. Approve them from an admin tool by calling:
+
+```bash
+curl -X POST https://your-domain.vercel.app/api/admin/orders/ORDER_ID/approve \
+	-H "x-admin-token: $ADMIN_TOKEN"
+```
+
+List pending orders:
+
+```bash
+curl https://your-domain.vercel.app/api/admin/orders?status=pending \
+	-H "x-admin-token: $ADMIN_TOKEN"
+```
 
 ## Checks
 
