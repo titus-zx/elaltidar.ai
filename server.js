@@ -49,6 +49,12 @@ function keyHash(key) {
   return createHash('sha256').update(key).digest('hex');
 }
 
+function addDays(value, days) {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
 function mapCustomer(row) {
   return row ? {
     id: row.id,
@@ -70,6 +76,7 @@ function mapOrder(row) {
     status: row.status,
     createdAt: row.created_at || row.createdAt,
     paidAt: row.paid_at || row.paidAt,
+    expiresAt: row.expires_at || row.expiresAt || null,
     customer: row.customer_email || row.customerEmail ? {
       id: row.customer_id || row.customerId,
       email: row.customer_email || row.customerEmail,
@@ -158,8 +165,10 @@ function createPostgresStore(databaseUrl) {
         amount INTEGER NOT NULL,
         status TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        paid_at TEXT
+        paid_at TEXT,
+        expires_at TEXT
       );
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS expires_at TEXT;
     `);
     return ready;
   };
@@ -233,34 +242,60 @@ function createPostgresStore(databaseUrl) {
     async createOrder(customerId, packageId) {
       await ensureReady();
       const pkg = packages[packageId] || packages.starter;
-      const row = { id: randomBytes(8).toString('hex'), customerId, packageId: pkg.id, packageName: pkg.name, amount: pkg.maxBudget, status: 'pending', createdAt: new Date().toISOString(), paidAt: null };
+      const row = { id: randomBytes(8).toString('hex'), customerId, packageId: pkg.id, packageName: pkg.name, amount: pkg.maxBudget, status: 'pending', createdAt: new Date().toISOString(), paidAt: null, expiresAt: null };
       await pool.query(`
-        INSERT INTO orders (id, customer_id, package_id, package_name, amount, status, created_at, paid_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [row.id, row.customerId, row.packageId, row.packageName, row.amount, row.status, row.createdAt, row.paidAt]);
+        INSERT INTO orders (id, customer_id, package_id, package_name, amount, status, created_at, paid_at, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, [row.id, row.customerId, row.packageId, row.packageName, row.amount, row.status, row.createdAt, row.paidAt, row.expiresAt]);
       return row;
     },
     async approveOrder(orderId) {
       await ensureReady();
       const paidAt = new Date().toISOString();
+      const existing = await pool.query('SELECT package_id FROM orders WHERE id = $1', [orderId]);
+      if (!existing.rows[0]) return null;
+      const pkg = packages[existing.rows[0].package_id] || packages.starter;
+      const expiresAt = addDays(paidAt, pkg.durationDays);
       const result = await pool.query(`
-        UPDATE orders SET status = 'paid', paid_at = $1 WHERE id = $2
-        RETURNING id, customer_id, package_id, package_name, amount, status, created_at, paid_at
-      `, [paidAt, orderId]);
+        UPDATE orders SET status = 'paid', paid_at = $1, expires_at = $2 WHERE id = $3
+        RETURNING id, customer_id, package_id, package_name, amount, status, created_at, paid_at, expires_at
+      `, [paidAt, expiresAt, orderId]);
       return mapOrder(result.rows[0]);
+    },
+    async customerByApiKey(key) {
+      await ensureReady();
+      if (!key) return null;
+      const result = await pool.query(`
+        SELECT customers.id, customers.email, customers.display_name, customers.telegram_id, customers.telegram_username, customers.created_at
+        FROM api_keys
+        JOIN customers ON customers.id = api_keys.customer_id
+        WHERE api_keys.key_hash = $1
+      `, [keyHash(key)]);
+      return mapCustomer(result.rows[0]);
+    },
+    async availableModels(customerId) {
+      await ensureReady();
+      const now = new Date().toISOString();
+      const result = await pool.query(`
+        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at, expires_at
+        FROM orders
+        WHERE customer_id = $1 AND status = 'paid' AND expires_at > $2
+        ORDER BY expires_at DESC
+      `, [customerId, now]);
+      return result.rows.map(mapOrder).map((order) => ({ order, package: packages[order.packageId] || packages.starter }));
     },
     async listOrders({ status } = {}) {
       await ensureReady();
       const result = status
         ? await pool.query(`
-          SELECT orders.id, orders.customer_id, orders.package_id, orders.package_name, orders.amount, orders.status, orders.created_at, orders.paid_at,
+          SELECT orders.id, orders.customer_id, orders.package_id, orders.package_name, orders.amount, orders.status, orders.created_at, orders.paid_at, orders.expires_at,
             customers.email AS customer_email, customers.display_name AS customer_display_name, customers.telegram_username AS customer_telegram_username
           FROM orders
           JOIN customers ON customers.id = orders.customer_id
           WHERE orders.status = $1 ORDER BY orders.created_at DESC
         `, [status])
         : await pool.query(`
-          SELECT orders.id, orders.customer_id, orders.package_id, orders.package_name, orders.amount, orders.status, orders.created_at, orders.paid_at,
+          SELECT orders.id, orders.customer_id, orders.package_id, orders.package_name, orders.amount, orders.status, orders.created_at, orders.paid_at, orders.expires_at,
             customers.email AS customer_email, customers.display_name AS customer_display_name, customers.telegram_username AS customer_telegram_username
           FROM orders
           JOIN customers ON customers.id = orders.customer_id
@@ -275,14 +310,15 @@ function createPostgresStore(databaseUrl) {
         FROM api_keys WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1
       `, [customer.id]);
       const activePackage = await pool.query(`
-        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at
-        FROM orders WHERE customer_id = $1 AND status = 'paid' ORDER BY paid_at DESC LIMIT 1
-      `, [customer.id]);
+        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at, expires_at
+        FROM orders WHERE customer_id = $1 AND status = 'paid' AND expires_at > $2 ORDER BY paid_at DESC LIMIT 1
+      `, [customer.id, new Date().toISOString()]);
       const orders = await pool.query(`
-        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at
+        SELECT id, customer_id, package_id, package_name, amount, status, created_at, paid_at, expires_at
         FROM orders WHERE customer_id = $1 ORDER BY created_at DESC
       `, [customer.id]);
-      return { customer, activePackage: mapOrder(activePackage.rows[0]), latestKey: mapKey(latestKey.rows[0]), orders: orders.rows.map(mapOrder) };
+      const availableModels = (await this.availableModels(customer.id)).map((item) => ({ id: item.package.model, name: item.package.name, packageId: item.package.id, expiresAt: item.order.expiresAt }));
+      return { customer, activePackage: mapOrder(activePackage.rows[0]), availableModels, latestKey: mapKey(latestKey.rows[0]), orders: orders.rows.map(mapOrder) };
     },
   };
 }
@@ -326,6 +362,7 @@ function createSqliteStore(file) {
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       paid_at TEXT,
+      expires_at TEXT,
       FOREIGN KEY (customer_id) REFERENCES customers(id)
     );
   `);
@@ -334,6 +371,8 @@ function createSqliteStore(file) {
   if (!customerColumns.has('telegram_id')) db.prepare('ALTER TABLE customers ADD COLUMN telegram_id TEXT').run();
   if (!customerColumns.has('telegram_username')) db.prepare('ALTER TABLE customers ADD COLUMN telegram_username TEXT').run();
   db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS customers_telegram_id_idx ON customers(telegram_id) WHERE telegram_id IS NOT NULL').run();
+  const orderColumns = new Set(db.prepare('PRAGMA table_info(orders)').all().map((column) => column.name));
+  if (!orderColumns.has('expires_at')) db.prepare('ALTER TABLE orders ADD COLUMN expires_at TEXT').run();
 
   return {
     close() {
@@ -394,32 +433,57 @@ function createSqliteStore(file) {
     },
     createOrder(customerId, packageId) {
       const pkg = packages[packageId] || packages.starter;
-      const row = { id: randomBytes(8).toString('hex'), customerId, packageId: pkg.id, packageName: pkg.name, amount: pkg.maxBudget, status: 'pending', createdAt: new Date().toISOString(), paidAt: null };
+      const row = { id: randomBytes(8).toString('hex'), customerId, packageId: pkg.id, packageName: pkg.name, amount: pkg.maxBudget, status: 'pending', createdAt: new Date().toISOString(), paidAt: null, expiresAt: null };
       db.prepare(`
-        INSERT INTO orders (id, customer_id, package_id, package_name, amount, status, created_at, paid_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(row.id, row.customerId, row.packageId, row.packageName, row.amount, row.status, row.createdAt, row.paidAt);
+        INSERT INTO orders (id, customer_id, package_id, package_name, amount, status, created_at, paid_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(row.id, row.customerId, row.packageId, row.packageName, row.amount, row.status, row.createdAt, row.paidAt, row.expiresAt);
       return row;
     },
     approveOrder(orderId) {
       const paidAt = new Date().toISOString();
-      db.prepare("UPDATE orders SET status = 'paid', paid_at = ? WHERE id = ?").run(paidAt, orderId);
+      const existing = db.prepare('SELECT package_id AS packageId FROM orders WHERE id = ?').get(orderId);
+      if (!existing) return null;
+      const pkg = packages[existing.packageId] || packages.starter;
+      const expiresAt = addDays(paidAt, pkg.durationDays);
+      db.prepare("UPDATE orders SET status = 'paid', paid_at = ?, expires_at = ? WHERE id = ?").run(paidAt, expiresAt, orderId);
       return db.prepare(`
-        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt
+        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt, expires_at AS expiresAt
         FROM orders WHERE id = ?
       `).get(orderId) || null;
+    },
+    customerByApiKey(key) {
+      if (!key) return null;
+      const customer = db.prepare(`
+        SELECT customers.id, customers.email, customers.created_at AS createdAt,
+          customers.display_name AS displayName, customers.telegram_id AS telegramId, customers.telegram_username AS telegramUsername
+        FROM keys
+        JOIN customers ON customers.id = keys.customer_id
+        WHERE keys.key_hash = ?
+      `).get(keyHash(key));
+      return mapCustomer(customer);
+    },
+    availableModels(customerId) {
+      const now = new Date().toISOString();
+      const orders = db.prepare(`
+        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt, expires_at AS expiresAt
+        FROM orders
+        WHERE customer_id = ? AND status = 'paid' AND expires_at > ?
+        ORDER BY expires_at DESC
+      `).all(customerId, now).map(mapOrder);
+      return orders.map((order) => ({ order, package: packages[order.packageId] || packages.starter }));
     },
     listOrders({ status } = {}) {
       const query = status
         ? db.prepare(`
-          SELECT orders.id, orders.customer_id AS customerId, orders.package_id AS packageId, orders.package_name AS packageName, orders.amount, orders.status, orders.created_at AS createdAt, orders.paid_at AS paidAt,
+          SELECT orders.id, orders.customer_id AS customerId, orders.package_id AS packageId, orders.package_name AS packageName, orders.amount, orders.status, orders.created_at AS createdAt, orders.paid_at AS paidAt, orders.expires_at AS expiresAt,
             customers.email AS customerEmail, customers.display_name AS customerDisplayName, customers.telegram_username AS customerTelegramUsername
           FROM orders
           JOIN customers ON customers.id = orders.customer_id
           WHERE orders.status = ? ORDER BY orders.created_at DESC
         `).all(status)
         : db.prepare(`
-          SELECT orders.id, orders.customer_id AS customerId, orders.package_id AS packageId, orders.package_name AS packageName, orders.amount, orders.status, orders.created_at AS createdAt, orders.paid_at AS paidAt,
+          SELECT orders.id, orders.customer_id AS customerId, orders.package_id AS packageId, orders.package_name AS packageName, orders.amount, orders.status, orders.created_at AS createdAt, orders.paid_at AS paidAt, orders.expires_at AS expiresAt,
             customers.email AS customerEmail, customers.display_name AS customerDisplayName, customers.telegram_username AS customerTelegramUsername
           FROM orders
           JOIN customers ON customers.id = orders.customer_id
@@ -433,14 +497,15 @@ function createSqliteStore(file) {
         FROM keys WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1
       `).get(customer.id) || null;
       const activePackage = db.prepare(`
-        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt
-        FROM orders WHERE customer_id = ? AND status = 'paid' ORDER BY paid_at DESC LIMIT 1
-      `).get(customer.id) || null;
+        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt, expires_at AS expiresAt
+        FROM orders WHERE customer_id = ? AND status = 'paid' AND expires_at > ? ORDER BY paid_at DESC LIMIT 1
+      `).get(customer.id, new Date().toISOString()) || null;
       const orders = db.prepare(`
-        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt
+        SELECT id, customer_id AS customerId, package_id AS packageId, package_name AS packageName, amount, status, created_at AS createdAt, paid_at AS paidAt, expires_at AS expiresAt
         FROM orders WHERE customer_id = ? ORDER BY created_at DESC
       `).all(customer.id);
-      return { customer, activePackage: mapOrder(activePackage), latestKey: mapKey(latestKey), orders: orders.map(mapOrder) };
+      const availableModels = this.availableModels(customer.id).map((item) => ({ id: item.package.model, name: item.package.name, packageId: item.package.id, expiresAt: item.order.expiresAt }));
+      return { customer, activePackage: mapOrder(activePackage), availableModels, latestKey: mapKey(latestKey), orders: orders.map(mapOrder) };
     },
   };
 }
@@ -522,6 +587,24 @@ export function createApiServer({ store, config = loadConfig(), fetchImpl = fetc
     return res.json({ ...dashboard, usage, gateway: { baseUrl: `${config.litellmBaseUrl}/v1` }, packages: Object.values(packages) });
   });
 
+  app.get('/v1/models', async (req, res) => {
+    const customer = await appStore.customerByApiKey(getToken(req));
+    if (!customer) return res.status(401).json({ error: { message: 'Unauthorized', type: 'invalid_request_error', code: 'unauthorized' } });
+    const availableModels = await appStore.availableModels(customer.id);
+    return res.json({
+      object: 'list',
+      data: availableModels.map((item) => ({
+        id: item.package.model,
+        object: 'model',
+        created: Math.floor(new Date(item.order.paidAt || item.order.createdAt).getTime() / 1000),
+        owned_by: 'elaltidarai',
+        permission: [],
+        root: item.package.model,
+        parent: null,
+      })),
+    });
+  });
+
   app.post('/api/orders', async (req, res) => {
     const customer = await appStore.customerByToken(getToken(req, req.body));
     if (!customer) return res.status(401).json({ error: 'unauthorized' });
@@ -545,24 +628,31 @@ export function createApiServer({ store, config = loadConfig(), fetchImpl = fetc
     if (!customer) return res.status(401).json({ error: 'unauthorized' });
     if (!config.litellmMasterKey) return res.status(500).json({ error: 'missing_litellm_master_key' });
 
-    const pkg = packages[req.body.packageId] || packages.starter;
-    const keyAlias = `elaltidar-${customer.id}-${pkg.id}`;
+    const activeEntitlements = await appStore.availableModels(customer.id);
+    if (activeEntitlements.length === 0) return res.status(402).json({ error: 'no_active_model_entitlement' });
+    const activeModels = Array.from(new Set(activeEntitlements.map((item) => item.package.model)));
+    const totalBudget = activeEntitlements.reduce((sum, item) => sum + item.order.amount, 0);
+    const latestExpiry = activeEntitlements.reduce((latest, item) => item.order.expiresAt > latest ? item.order.expiresAt : latest, activeEntitlements[0].order.expiresAt);
+    const remainingDays = Math.max(1, Math.ceil((new Date(latestExpiry).getTime() - Date.now()) / 86400000));
+    const packageId = activeEntitlements[0].package.id;
+    const keyAlias = `elaltidar-${customer.id}-multi`;
     const llmRes = await fetchImpl(`${config.litellmBaseUrl}/key/generate`, {
       method: 'POST',
       headers: { authorization: `Bearer ${config.litellmMasterKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         key_alias: keyAlias,
         key_name: keyAlias,
-        max_budget: pkg.maxBudget,
-        duration: `${pkg.durationDays}d`,
-        metadata: { customer_id: customer.id, customer_email: customer.email, package_id: pkg.id, brand: 'ElaltidarAI' },
+        max_budget: totalBudget,
+        duration: `${remainingDays}d`,
+        models: activeModels,
+        metadata: { customer_id: customer.id, customer_email: customer.email, package_ids: activeEntitlements.map((item) => item.package.id), brand: 'ElaltidarAI' },
       }),
     });
     const payload = await llmRes.json();
     if (!llmRes.ok) return res.status(llmRes.status).json({ error: 'litellm_key_generate_failed', detail: payload });
     const key = payload.key || payload.token;
     if (!key) return res.status(502).json({ error: 'litellm_key_missing', detail: payload });
-    const keyMeta = await appStore.saveKey(customer.id, key, pkg.id, { ...payload, key_alias: keyAlias });
+    const keyMeta = await appStore.saveKey(customer.id, key, packageId, { ...payload, key_alias: keyAlias });
     return res.json({ key, keyMeta });
   });
 

@@ -29,6 +29,7 @@ type Order = {
   status: 'pending' | 'paid';
   createdAt: string;
   paidAt: string | null;
+  expiresAt: string | null;
   customer?: {
     id: string;
     email: string;
@@ -47,6 +48,7 @@ type KeyMeta = {
 type Dashboard = {
   customer: Customer;
   activePackage: Order | null;
+  availableModels: Array<{ id: string; name: string; packageId: string; expiresAt: string }>;
   latestKey: KeyMeta | null;
   orders: Order[];
   gateway: { baseUrl: string };
@@ -235,14 +237,14 @@ function AdminApp() {
         {message && <p className="notice">{message}</p>}
         <div className="adminTable">
           <div className="adminTableHeader">
-            <span>Customer</span><span>Package</span><span>Amount</span><span>Status</span><span>Created</span><span>Action</span>
+            <span>Customer</span><span>Package</span><span>Amount</span><span>Status</span><span>Expires</span><span>Action</span>
           </div>
           {orders.length === 0 ? <div className="adminEmpty">Belum ada order untuk filter ini.</div> : orders.map((order) => <article className="adminOrderRow" key={order.id}>
             <div><b>{order.customer?.displayName || order.customer?.email || order.customerId}</b><small>{order.customer?.telegramUsername ? `@${order.customer.telegramUsername}` : order.customer?.email}</small></div>
             <div><b>{order.packageName}</b><small>{order.id}</small></div>
             <div>{formatRupiah(order.amount)}</div>
             <div><span className={`statusBadge ${order.status}`}>{order.status}</span></div>
-            <div>{formatDate(order.createdAt)}</div>
+            <div>{formatDate(order.expiresAt)}</div>
             <div>{order.status === 'pending' ? <button disabled={busy === `approve-${order.id}`} onClick={() => approveOrder(order.id)}>{busy === `approve-${order.id}` ? 'Approving...' : 'Approve'}</button> : <span className="paidAt">Paid {formatDate(order.paidAt)}</span>}</div>
           </article>)}
         </div>
@@ -325,8 +327,22 @@ function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, sele
           <div className="dashboardMetricGrid">
             <article><span>Saldo Elaltidar</span><strong>Rp 0</strong><small>Manual topup soon</small></article>
             <article><span>Sisa token</span><strong>{activeQuota}</strong><small>Quota aktif</small></article>
-            <article><span>Model aktif</span><strong>{packages.length}</strong><small>Model tersedia</small></article>
+            <article><span>Model dibeli</span><strong>{dashboard.availableModels.length}</strong><small>{packages.length} model tersedia</small></article>
           </div>
+
+          <section className="dashboardEntitlementPanel">
+            <div className="dashboardPanelHead">
+              <div><span>Model access</span><h2>Model yang sudah dibeli</h2></div>
+              <b>{dashboard.availableModels.length} active</b>
+            </div>
+            {dashboard.availableModels.length === 0 ? <p className="dashboardEmptyText">Belum ada model aktif. Beli paket token, lalu tunggu approval admin.</p> : <div className="entitlementGrid">
+              {dashboard.availableModels.map((model) => <article key={`${model.packageId}-${model.expiresAt}`}>
+                <strong>{model.name}</strong>
+                <code>{model.id}</code>
+                <span>Aktif sampai {formatDate(model.expiresAt)}</span>
+              </article>)}
+            </div>}
+          </section>
 
           <section className="dashboardApiPanel">
             <div className="dashboardPanelHead">

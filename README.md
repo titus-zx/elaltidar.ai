@@ -60,6 +60,15 @@ curl https://your-domain.vercel.app/api/admin/orders?status=pending \
 	-H "x-admin-token: $ADMIN_TOKEN"
 ```
 
+Paid orders create model entitlements with an expiry based on the package duration. Customer API keys can call:
+
+```bash
+curl https://your-domain.vercel.app/v1/models \
+	-H "Authorization: Bearer $ELALTIDAR_API_KEY"
+```
+
+The response only includes models from active, non-expired paid orders for that customer.
+
 ## Checks
 
 ```bash

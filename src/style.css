@@ -1030,6 +1030,7 @@ footer {
 
 .dashboardLoginCard,
 .dashboardMetricGrid article,
+.dashboardEntitlementPanel,
 .dashboardApiPanel,
 .dashboardUsagePanel,
 .dashboardQuickActions {
@@ -1092,11 +1093,50 @@ footer {
   font-weight: 800;
 }
 
+.dashboardEntitlementPanel,
 .dashboardApiPanel,
 .dashboardUsagePanel,
 .dashboardQuickActions {
   margin-top: 16px;
   padding: 20px;
+}
+
+.entitlementGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.entitlementGrid article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(255, 253, 247, 0.08);
+  border-radius: 8px;
+  padding: 14px;
+  background: #111412;
+}
+
+.entitlementGrid strong,
+.entitlementGrid code,
+.entitlementGrid span {
+  overflow-wrap: anywhere;
+}
+
+.entitlementGrid strong {
+  color: #f8f4ea;
+}
+
+.entitlementGrid code {
+  color: #cdd6d1;
+  font-size: 13px;
+}
+
+.entitlementGrid span,
+.dashboardEmptyText {
+  color: #9aa5a0;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .dashboardPanelHead {
@@ -1424,6 +1464,7 @@ footer {
 
   .apiKeyPanel,
   .usageStats,
+  .entitlementGrid,
   .memberTop {
     grid-template-columns: 1fr;
   }
