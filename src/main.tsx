@@ -268,11 +268,12 @@ type MemberDashboardAppProps = {
   setEmail: (email: string) => void;
   login: (event: FormEvent) => void;
   logout: () => void;
+  createOrder: (packageId: string) => void;
   createKey: (packageId: string) => void;
   refreshDashboard: () => void;
 };
 
-function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, selectedPackage, plainKey, token, busy, message, publicConfig, email, setEmail, login, logout, createKey, refreshDashboard }: MemberDashboardAppProps) {
+function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, selectedPackage, plainKey, token, busy, message, publicConfig, email, setEmail, login, logout, createOrder, createKey, refreshDashboard }: MemberDashboardAppProps) {
   const activeQuotaParts = dashboard?.activePackage?.packageName.split(' ') || [];
   const activeQuota = activeQuotaParts[activeQuotaParts.length - 1] || '0';
 
@@ -289,8 +290,8 @@ function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, sele
         <div className="memberSidebarBrand"><span>AI</span><strong>ElaltidarAI</strong></div>
         <nav>
           <a className="isActive" href="/dashboard">Dasbor</a>
-          <a href="/#pricing">Kuota</a>
-          <a href="/#pricing">Topup</a>
+          <a href="#quota">Kuota</a>
+          <a href="#quota">Topup</a>
           <a href="/#docs">Dokumentasi</a>
           <a href="/admin">Admin</a>
         </nav>
@@ -370,11 +371,26 @@ function MemberDashboardApp({ dashboard, memberName, latestOrder, packages, sele
             {latestOrder?.status === 'pending' && <p className="approvalNote">Order sedang menunggu approval admin setelah pembayaran dikonfirmasi.</p>}
           </section>
 
+          <section id="quota" className="dashboardQuotaPanel">
+            <div className="dashboardPanelHead">
+              <div><span>Buy quota</span><h2>Pilih paket dari dashboard</h2></div>
+            </div>
+            <div className="dashboardPackageGrid">
+              {packages.map((item) => <article key={item.id}>
+                <span>{item.model}</span>
+                <strong>{item.name}</strong>
+                <p>{item.quota}</p>
+                <b>{item.price}</b>
+                <button disabled={busy === `order-${item.id}`} onClick={() => createOrder(item.id)}>{busy === `order-${item.id}` ? 'Membuat...' : 'Beli paket'}</button>
+              </article>)}
+            </div>
+          </section>
+
           <section className="dashboardQuickActions">
             <h2>Quick actions</h2>
             <div>
-              <a href="/#pricing">Lihat model</a>
-              <a href="/#pricing">Buy quota</a>
+              <a href="#quota">Lihat model</a>
+              <a href="#quota">Buy quota</a>
               <a href="/#docs">Docs API</a>
               <button onClick={refreshDashboard}>Refresh dashboard</button>
             </div>
@@ -396,10 +412,12 @@ function App() {
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const [path, setPath] = useState(window.location.pathname);
+  const [pendingPackageId, setPendingPackageId] = useState(() => new URLSearchParams(window.location.search).get('package') || '');
 
   function navigate(pathname: string) {
     window.history.pushState({}, '', pathname);
     setPath(window.location.pathname);
+    setPendingPackageId(new URLSearchParams(window.location.search).get('package') || '');
   }
 
   async function refreshDashboard(currentToken = token) {
@@ -435,7 +453,7 @@ function App() {
         setToken(data.token);
         setMessage('Login Telegram berhasil. Session tersimpan di browser ini.');
         await refreshDashboard(data.token);
-        navigate('/dashboard');
+        navigate(pendingPackageId ? `/dashboard?package=${encodeURIComponent(pendingPackageId)}` : '/dashboard');
       } catch (error) {
         setMessage(`Login Telegram gagal: ${(error as Error).message}`);
       } finally {
@@ -474,7 +492,7 @@ function App() {
       setToken(data.token);
       setMessage('Login berhasil. Session tersimpan di browser ini.');
       await refreshDashboard(data.token);
-      navigate('/dashboard');
+      navigate(pendingPackageId ? `/dashboard?package=${encodeURIComponent(pendingPackageId)}` : '/dashboard');
     } catch (error) {
       setMessage(`Login gagal: ${(error as Error).message}`);
     } finally {
@@ -491,7 +509,13 @@ function App() {
   }
 
   async function createOrder(packageId: string) {
-    if (!token) return setMessage('Login dulu untuk membuat order.');
+    if (!token) {
+      window.history.pushState({}, '', `/dashboard?package=${encodeURIComponent(packageId)}`);
+      setPath('/dashboard');
+      setPendingPackageId(packageId);
+      setMessage('Login Telegram dulu untuk melanjutkan pembelian paket.');
+      return;
+    }
     setBusy(`order-${packageId}`);
     setMessage('');
     try {
@@ -533,8 +557,16 @@ function App() {
   const latestOrder = dashboard?.orders[0] || null;
   const memberName = dashboard?.customer.displayName || dashboard?.customer.email;
 
+  useEffect(() => {
+    if (!token || !pendingPackageId || !dashboard) return;
+    const packageId = pendingPackageId;
+    setPendingPackageId('');
+    window.history.replaceState({}, '', '/dashboard');
+    createOrder(packageId);
+  }, [token, pendingPackageId, dashboard]);
+
   if (path === '/admin') return <AdminApp />;
-  if (path === '/dashboard') return <MemberDashboardApp dashboard={dashboard} memberName={memberName} latestOrder={latestOrder} packages={packages} selectedPackage={selectedPackage} plainKey={plainKey} token={token} busy={busy} message={message} publicConfig={publicConfig} email={email} setEmail={setEmail} login={login} logout={logout} createKey={createKey} refreshDashboard={refreshDashboard} />;
+  if (path === '/dashboard') return <MemberDashboardApp dashboard={dashboard} memberName={memberName} latestOrder={latestOrder} packages={packages} selectedPackage={selectedPackage} plainKey={plainKey} token={token} busy={busy} message={message} publicConfig={publicConfig} email={email} setEmail={setEmail} login={login} logout={logout} createOrder={createOrder} createKey={createKey} refreshDashboard={refreshDashboard} />;
 
   return <>
     <header className="nav">

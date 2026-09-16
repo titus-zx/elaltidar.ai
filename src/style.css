@@ -1033,6 +1033,7 @@ footer {
 .dashboardEntitlementPanel,
 .dashboardApiPanel,
 .dashboardUsagePanel,
+.dashboardQuotaPanel,
 .dashboardQuickActions {
   border: 1px solid rgba(255, 253, 247, 0.1);
   border-radius: 8px;
@@ -1096,6 +1097,7 @@ footer {
 .dashboardEntitlementPanel,
 .dashboardApiPanel,
 .dashboardUsagePanel,
+.dashboardQuotaPanel,
 .dashboardQuickActions {
   margin-top: 16px;
   padding: 20px;
@@ -1183,6 +1185,51 @@ footer {
   padding: 13px;
   background: #242826;
   color: #f8f4ea;
+}
+
+.dashboardPackageGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboardPackageGrid article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(255, 253, 247, 0.08);
+  border-radius: 8px;
+  padding: 14px;
+  background: #111412;
+}
+
+.dashboardPackageGrid span {
+  color: #9aa5a0;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboardPackageGrid strong,
+.dashboardPackageGrid b {
+  color: #f8f4ea;
+  overflow-wrap: anywhere;
+}
+
+.dashboardPackageGrid p {
+  margin-bottom: 0;
+  color: #aab2ad;
+}
+
+.dashboardPackageGrid button {
+  min-height: 40px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #e6542d;
+  color: #fffdf7;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .dashboardQuickActions div {
@@ -1465,6 +1512,7 @@ footer {
   .apiKeyPanel,
   .usageStats,
   .entitlementGrid,
+  .dashboardPackageGrid,
   .memberTop {
     grid-template-columns: 1fr;
   }
