@@ -15,6 +15,8 @@ type Package = {
 type Customer = {
   id: string;
   email: string;
+  displayName?: string;
+  telegramUsername?: string | null;
   createdAt: string;
 };
 
@@ -200,6 +202,14 @@ function App() {
     }
   }
 
+  function logout() {
+    localStorage.removeItem('elaltidar_token');
+    setToken('');
+    setDashboard(null);
+    setPlainKey('');
+    setMessage('Session sudah keluar dari browser ini.');
+  }
+
   async function createOrder(packageId: string) {
     if (!token) return setMessage('Login dulu untuk membuat order.');
     setBusy(`order-${packageId}`);
@@ -241,6 +251,7 @@ function App() {
 
   const selectedPackage = dashboard?.activePackage?.packageId || dashboard?.latestKey?.packageId || packages[0]?.id || 'starter';
   const latestOrder = dashboard?.orders[0] || null;
+  const memberName = dashboard?.customer.displayName || dashboard?.customer.email;
 
   return <>
     <header className="nav">
@@ -251,7 +262,11 @@ function App() {
         <a href="#dashboard">Dashboard</a>
         <a href="#docs">Docs</a>
       </nav>
-      <a className="login" href="#dashboard">Member Area</a>
+      <div className="navActions">
+        {memberName && <span className="memberPill">{memberName}</span>}
+        <a className="login" href="#dashboard">{dashboard ? 'Dashboard' : 'Member Area'}</a>
+        {token && <button className="logoutButton" onClick={logout}>Logout</button>}
+      </div>
     </header>
 
     <main id="top">
@@ -331,12 +346,17 @@ function App() {
       <section id="dashboard" className="section dashboard">
         <div>
           <p className="eyebrow">Member dashboard</p>
-          <h2>Customer area MVP</h2>
+          <h2>Member area</h2>
           <p>Login Telegram untuk membuat order, menunggu approval admin, lalu generate key LiteLLM dengan quota paket.</p>
-          <div className="telegramLogin">
+          {!dashboard ? <div className="telegramLogin">
             <div id="telegram-login-slot"></div>
             {!publicConfig.telegramBotUsername && <span>Set TELEGRAM_BOT_USERNAME di Vercel untuk mengaktifkan tombol Telegram.</span>}
-          </div>
+          </div> : <div className="sessionCard">
+            <span>Signed in</span>
+            <strong>{memberName}</strong>
+            {dashboard.customer.telegramUsername && <p>@{dashboard.customer.telegramUsername}</p>}
+            <button onClick={logout}>Logout</button>
+          </div>}
           {publicConfig.allowDevLogin && <form className="loginForm" onSubmit={login}>
             <input type="email" placeholder="email dev login" value={email} onChange={(event) => setEmail(event.target.value)} required />
             <button disabled={busy === 'login'}>{busy === 'login' ? 'Masuk...' : 'Dev login'}</button>

@@ -74,7 +74,9 @@ a {
 .plan button,
 .loginForm button,
 .keyBox button,
-.wideButton {
+.wideButton,
+.logoutButton,
+.sessionCard button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -93,12 +95,38 @@ a {
   border: 1px solid rgba(23, 32, 27, 0.12);
 }
 
+.navActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.memberPill {
+  max-width: 180px;
+  overflow: hidden;
+  border: 1px solid rgba(23, 32, 27, 0.1);
+  border-radius: 999px;
+  padding: 10px 13px;
+  background: rgba(21, 96, 91, 0.08);
+  color: #15605b;
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .primary,
 .plan button,
 .loginForm button,
 .keyBox button,
-.wideButton {
+.wideButton,
+.sessionCard button {
   background: #e6542d;
+  color: #fffdf7;
+}
+
+.logoutButton {
+  background: #17201b;
   color: #fffdf7;
 }
 
@@ -108,7 +136,9 @@ a {
 .plan button:hover,
 .loginForm button:hover,
 .keyBox button:hover,
-.wideButton:hover {
+.wideButton:hover,
+.logoutButton:hover,
+.sessionCard button:hover {
   transform: translateY(-2px);
   box-shadow: 0 16px 36px rgba(119, 64, 35, 0.16);
 }
@@ -493,6 +523,11 @@ footer {
   align-items: start;
 }
 
+.dashboard h2 {
+  max-width: 560px;
+  font-size: clamp(34px, 5vw, 58px);
+}
+
 .loginForm {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -506,8 +541,44 @@ footer {
   margin-top: 24px;
   border: 1px solid rgba(23, 32, 27, 0.1);
   border-radius: 8px;
-  padding: 14px;
-  background: #fffdf7;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(42, 171, 238, 0.08), transparent 46%),
+    #fffdf7;
+}
+
+.telegramLogin iframe {
+  max-width: 100%;
+}
+
+.sessionCard {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+  border: 1px solid rgba(21, 96, 91, 0.16);
+  border-radius: 8px;
+  padding: 18px;
+  background: rgba(21, 96, 91, 0.08);
+}
+
+.sessionCard span {
+  color: #15605b;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sessionCard strong {
+  overflow-wrap: anywhere;
+  color: #17201b;
+  font-size: 22px;
+}
+
+.sessionCard p {
+  margin-bottom: 6px;
+  color: #54645d;
+  font-weight: 800;
 }
 
 .telegramLogin span,
@@ -690,6 +761,15 @@ footer {
 
   .nav nav {
     flex-wrap: wrap;
+  }
+
+  .navActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .memberPill {
+    max-width: 100%;
   }
 
   .hero,
